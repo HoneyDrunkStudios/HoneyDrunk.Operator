@@ -167,11 +167,11 @@ No homelab required. No infrastructure to provision. Start small, expand when it
 
 ### Phase 1 — Docs & Contracts
 
-Read the `docs/` and `contracts/` directories. Understand the architecture, the Signal formats, the request packet schema. This is the foundation.
+Start by adding architecture docs to `docs/` and interface schemas to `contracts/`. Define the Signal formats, the request packet schema, and the Hive catalog structure. This is the foundation.
 
 ### Phase 2 — Prompts & Policies
 
-Explore `prompts/` and `policies/`. These define how Operator reasons about drift, risk, and content generation. Customize them for your Sectors.
+Build out `prompts/` and `policies/`. These define how Operator reasons about drift, risk, and content generation. Customize them for your Sectors.
 
 ### Phase 3 — Wire Up Automation
 
