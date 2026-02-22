@@ -1,0 +1,20 @@
+{
+  "$schema": "repo-allowlist",
+  "description": "Repos that Operator is authorized to propose changes to via PR. Any repo not listed here is off-limits.",
+  "version": "1.0.0",
+  "_comments": {
+    "usage": "Copy this template to repo-allowlist.json and populate with actual repo entries.",
+    "scopes": "Valid scopes: catalog-update, doc-update, drift-fix, status-transition, content-sync.",
+    "max_risk_level": "Maximum risk level Operator may assign to PRs for this repo. One of: LOW, MEDIUM, HIGH.",
+    "notes": "Free-text field for context. Not parsed by Operator."
+  },
+  "repos": [
+    {
+      "owner": "HoneyDrunkStudios",
+      "name": "EXAMPLE-REPO",
+      "scopes": ["catalog-update", "doc-update", "drift-fix"],
+      "max_risk_level": "MEDIUM",
+      "notes": "Replace with actual repo names. Remove this example entry."
+    }
+  ]
+}
