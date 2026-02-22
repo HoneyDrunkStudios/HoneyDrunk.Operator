@@ -1,0 +1,189 @@
+# Job Prompt — Doc Freshness
+
+> Detect documentation drift — stale, missing, or inconsistent docs — and
+> propose updates via PR.
+
+---
+
+## Job Identity
+
+- **Job Name**: Doc Freshness
+- **Agent**: Operator
+- **Type**: Deterministic audit
+- **Cadence**: On-demand or scheduled
+- **Output**: Freshness report + optional doc update drafts + PR
+
+---
+
+## Input Requirements
+
+You must receive all of the following before executing:
+
+| Input | Description |
+|---|---|
+| **Doc file listing** | List of all documentation files in the target repo (README.md, /docs/*, CONTRIBUTING.md, etc.) with last modified dates. |
+| **Doc content** | Current content of each documentation file. |
+| **Hive catalog entry** | Canonical JSON for the target Node, including description, status, topics, required files, and doc structure expectations. |
+| **Recent activity** | List of commits/PRs merged in the last 30 days with affected file paths. |
+| **Policy files** | Loaded contents of: path-denylist.md, repo-allowlist.template.json, pr-rules.md, risk-classification.md, status-transition-rules.md. |
+
+If any required input is missing or unparseable, halt and emit an error Signal
+to Pulse. Do not proceed with partial data.
+
+---
+
+## Task
+
+Detect documentation drift across the target repo. Check for the following
+issue types:
+
+### 1. Staleness
+
+A doc is **stale** when it has not been updated within its expected freshness
+window, while the code or configuration it describes has changed.
+
+| Doc Type | Staleness Threshold |
+|---|---|
+| README.md | 60 days without update if repo had commits |
+| /docs/* guides | 90 days without update if related code changed |
+| CONTRIBUTING.md | 180 days |
+| Architecture/design docs | 90 days if structural changes occurred |
+| Status references | Immediately stale if Hive status differs |
+
+### 2. Missing Required Docs
+
+Cross-reference the Hive catalog's `required_files` and the repo's current
+status against the status transition rules:
+
+- **Awake → Wiring** requires: README.md with basic structure.
+- **Wiring → Live** requires: Full documentation set per
+  `/policies/status-transition-rules.md`.
+
+Flag any required doc that is absent.
+
+### 3. Inconsistencies
+
+Detect content that contradicts current repo state:
+
+- Doc references a status that differs from the Hive catalog.
+- Doc mentions files, directories, or features that no longer exist.
+- Doc contains version numbers or dates that are outdated.
+- Doc describes a structure that doesn't match the actual directory layout.
+- Doc references repos, Nodes, or Sectors that have been renamed or removed.
+
+### 4. Broken Links
+
+Scan doc content for internal links (relative paths) and verify targets exist
+in the repo file listing. Flag dead links.
+
+---
+
+## Evidence List
+
+For each finding, record a structured entry:
+
+```markdown
+### Finding: {File Path}
+
+- **Issue Type**: {STALE | MISSING | INCONSISTENT | BROKEN_LINK}
+- **Details**: {Human-readable explanation.}
+- **Last Modified**: {date or "N/A" if missing}
+- **Staleness**: {days since last update, or "N/A"}
+- **Related Changes**: {Recent commits/PRs that make this doc outdated, if applicable.}
+- **Severity**: {INFO | WARN | ERROR}
+```
+
+---
+
+## Risk Classification
+
+| Risk Level | Criteria |
+|---|---|
+| **LOW** | Minor staleness (within 2x threshold), cosmetic inconsistencies, or optional docs missing. |
+| **MEDIUM** | Required docs missing for current status, or docs that actively mislead users about repo capabilities or structure. |
+| **HIGH** | Docs contradict security posture, license terms, or status in ways that could cause user harm or compliance issues. |
+
+Reference `/policies/risk-classification.md` for detailed guidance.
+
+---
+
+## Proposed Actions
+
+For each finding, propose exactly one action:
+
+| Action | When to use |
+|---|---|
+| **Update Doc** | The correct information is available and the update is straightforward. Generate a draft. |
+| **Add Missing Doc** | A required doc is absent. Generate a skeleton from available context. |
+| **Flag for Human Review** | The correct content is ambiguous, the doc covers a sensitive topic, or the update requires domain expertise. |
+
+When proposing "Update Doc" or "Add Missing Doc," generate the draft content
+and include it in `/staging`.
+
+---
+
+## Output Artifacts
+
+### Freshness Report
+
+Write the freshness report to `/staging`:
+
+```
+/staging/doc-freshness-{repo-name}-{YYYY-MM-DD}.md
+```
+
+The report must include:
+
+1. **Header**: Repo name, date, job name, total findings count.
+2. **Summary**: Overall freshness status, risk level, key findings.
+3. **Findings Table**: File path, issue type, severity, details, proposed
+   action.
+4. **Recommendations**: Prioritized list of actions.
+
+### Doc Drafts (optional)
+
+If "Update Doc" or "Add Missing Doc" actions are proposed, write drafts to:
+
+```
+/staging/doc-drafts/{repo-name}/{file-path}
+```
+
+Each draft should include a header comment:
+
+```markdown
+<!-- Draft generated by Operator/DocFreshness on {date}. Requires human review. -->
+```
+
+---
+
+## PR Creation
+
+If any proposed action involves file changes:
+
+1. Create a branch: `operator/doc-freshness/{repo-name}-{date}`
+2. Commit the freshness report and any doc drafts.
+3. Open a PR following `/policies/pr-rules.md`:
+   - Title: `[Operator/DocFreshness] Doc updates — {repo-name}`
+   - Include the freshness report summary in the PR description.
+   - Apply labels: `operator-doc`, `risk-{level}`.
+   - Add rollback notes.
+4. Never auto-merge. Require human review.
+
+If all proposed actions are "Flag for Human Review," write the report to
+`/staging` and emit a Signal to Pulse. No PR.
+
+---
+
+## Guardrails
+
+- Respect `/policies/path-denylist.md`. Skip denylisted paths during doc
+  scanning. Do not propose changes to denylisted files.
+- Only operate on repos in `/policies/repo-allowlist.template.json`. Verify
+  the repo is allowlisted and that `doc-update` is in its `scopes` array.
+- Never commit directly to `main` or protected branches.
+- Include rollback notes in every PR.
+- Generated doc drafts are *drafts*. Always mark them as requiring human
+  review. Never present generated content as final.
+- If the freshness report exceeds 30 findings, flag for human review
+  regardless. The repo may need a documentation overhaul, not incremental
+  patches.
