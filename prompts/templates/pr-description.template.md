@@ -12,9 +12,9 @@
 ```
 
 **Examples:**
-- `[Operator/DriftSentinel] Drift corrections — HoneyDrunk.Hive`
-- `[Operator/DocFreshness] Doc updates — HoneyDrunk.Pulse`
-- `[Operator/ContentForge] Change summary — HoneyDrunk.Operator`
+- `[Operator/Drift Sentinel] Drift corrections — HoneyDrunk.Hive`
+- `[Operator/Doc Freshness] Doc updates — HoneyDrunk.Pulse`
+- `[Operator/Content Forge] Change summary — HoneyDrunk.Operator`
 
 ---
 
