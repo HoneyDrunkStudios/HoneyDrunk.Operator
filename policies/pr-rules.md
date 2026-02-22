@@ -7,10 +7,10 @@
 ## PR Title Format
 
 ```
-[JobName] target-repo — short description
+[Operator/JobName] target-repo — short description
 ```
 
-- **JobName**: The Operator job that generated this PR (e.g., `catalog-sync`, `drift-check`).
+- **JobName**: The Operator job that generated this PR (e.g., `DriftSentinel`, `DocFreshness`, `ContentForge`).
 - **target-repo**: The repo being modified.
 
 ---

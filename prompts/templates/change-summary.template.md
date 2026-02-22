@@ -9,10 +9,10 @@
 
 | Field        | Value                          |
 |------------- |--------------------------------|
-| **Title**    | _Short, descriptive title_     |
+| **Title**    | {Short, descriptive title}     |
 | **Date**     | YYYY-MM-DD                     |
 | **Author**   | Operator (HoneyDrunk.Operator) |
-| **Target**   | _Node name / repo_             |
+| **Target**   | {Node name / repo}             |
 | **Risk**     | LOW · MEDIUM · HIGH            |
 | **Status**   | Draft · Proposed · Approved    |
 
