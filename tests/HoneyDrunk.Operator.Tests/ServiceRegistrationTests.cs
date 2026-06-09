@@ -1,8 +1,6 @@
 using HoneyDrunk.Kernel.Abstractions.Telemetry;
 using HoneyDrunk.Operator.Abstractions;
-using HoneyDrunk.Operator.Safety;
 using HoneyDrunk.Operator.Telemetry;
-using HoneyDrunk.Vault.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
 using NSubstitute;
 using Xunit;

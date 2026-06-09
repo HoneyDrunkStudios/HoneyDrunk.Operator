@@ -1,9 +1,9 @@
-using System.Collections.Concurrent;
 using HoneyDrunk.Audit.Abstractions;
 using HoneyDrunk.Operator.Abstractions;
 using HoneyDrunk.Operator.Audit;
 using HoneyDrunk.Operator.Events;
 using HoneyDrunk.Operator.Telemetry;
+using System.Collections.Concurrent;
 
 namespace HoneyDrunk.Operator.Approval;
 

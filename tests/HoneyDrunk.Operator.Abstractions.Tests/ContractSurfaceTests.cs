@@ -1,4 +1,3 @@
-using HoneyDrunk.Operator.Abstractions;
 using Xunit;
 
 namespace HoneyDrunk.Operator.Abstractions.Tests;

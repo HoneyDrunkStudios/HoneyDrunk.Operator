@@ -1,5 +1,5 @@
-using System.Diagnostics;
 using HoneyDrunk.Kernel.Abstractions.Telemetry;
+using System.Diagnostics;
 
 namespace HoneyDrunk.Operator.Telemetry;
 

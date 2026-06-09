@@ -1,7 +1,7 @@
+using HoneyDrunk.Kernel.Abstractions.Telemetry;
 using HoneyDrunk.Operator.Abstractions;
 using HoneyDrunk.Operator.Safety;
 using HoneyDrunk.Operator.Telemetry;
-using HoneyDrunk.Kernel.Abstractions.Telemetry;
 using NSubstitute;
 using Xunit;
 
