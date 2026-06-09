@@ -28,10 +28,13 @@ public sealed class DefaultSafetyFilter(IEnumerable<ISafetyRule> rules, Operator
         var fired = new List<string>();
         foreach (var rule in this.rules)
         {
-            if (await rule.IsViolatedAsync(request, cancellationToken).ConfigureAwait(false))
+            var violated = await rule.IsViolatedAsync(request, cancellationToken).ConfigureAwait(false);
+            if (!violated)
             {
-                fired.Add(rule.RuleId);
+                continue;
             }
+
+            fired.Add(rule.RuleId);
         }
 
         return fired.Count == 0
