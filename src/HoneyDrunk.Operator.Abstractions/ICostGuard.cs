@@ -21,7 +21,11 @@ public interface ICostGuard
     Task<CostCheckResult> CheckBudgetAsync(string scope, string window, decimal amount, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Records a cost event against a scope's accumulated spend.
+    /// Records a cost event against a scope's accumulated spend. The budget scope is the event's
+    /// actor identity (<see cref="CostEvent.AgentId"/>) paired with <see cref="CostEvent.Window"/>;
+    /// pass that same <c>scope</c>/<c>window</c> pair to <see cref="CheckBudgetAsync"/> and
+    /// <see cref="GetStatusAsync"/> to observe the spend recorded here. <see cref="CostEvent.TenantId"/>
+    /// is carried for attribution and is not the budget key in the shipped implementations.
     /// </summary>
     /// <param name="costEvent">The cost event to record.</param>
     /// <param name="cancellationToken">A token to observe for cancellation.</param>

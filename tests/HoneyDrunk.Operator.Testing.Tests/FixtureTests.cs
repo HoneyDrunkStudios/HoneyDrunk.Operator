@@ -51,6 +51,18 @@ public sealed class FixtureTests
             guard.RecordAsync(new CostEvent("e1", "agent", "t", "daily", -1m, "usd", "model", DateTimeOffset.UtcNow, "corr")));
     }
 
+    /// <summary>Reported remaining budget never goes negative once spend exceeds the limit, matching production.</summary>
+    [Fact]
+    public async Task CostGuard_status_remaining_is_clamped_to_zero()
+    {
+        var guard = new InMemoryCostGuard { DefaultLimit = 10m };
+        await guard.RecordAsync(new CostEvent("e1", "agent", "t", "daily", 12m, "usd", "model", DateTimeOffset.UtcNow, "corr"));
+
+        var status = await guard.GetStatusAsync("agent", "daily");
+        Assert.Equal(12m, status.Spent);
+        Assert.Equal(0m, status.Remaining);
+    }
+
     /// <summary>The permissive policy and safety filter always allow.</summary>
     [Fact]
     public async Task Permissive_fixtures_allow()

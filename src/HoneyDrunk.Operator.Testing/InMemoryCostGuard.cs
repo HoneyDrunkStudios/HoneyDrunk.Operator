@@ -47,6 +47,9 @@ public sealed class InMemoryCostGuard : ICostGuard
         ArgumentException.ThrowIfNullOrWhiteSpace(scope);
         ArgumentException.ThrowIfNullOrWhiteSpace(window);
         var current = this.spend.GetValueOrDefault((scope, window));
-        return Task.FromResult(new CostStatus(current, this.DefaultLimit, this.DefaultLimit > 0m ? this.DefaultLimit - current : decimal.MaxValue, window));
+
+        // Clamp reported remaining to zero once spend exceeds the limit, matching DefaultCostGuard so
+        // a fixture never hands a consumer a negative remaining budget.
+        return Task.FromResult(new CostStatus(current, this.DefaultLimit, this.DefaultLimit > 0m ? Math.Max(0m, this.DefaultLimit - current) : decimal.MaxValue, window));
     }
 }

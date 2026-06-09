@@ -5,9 +5,10 @@ namespace HoneyDrunk.Operator.Abstractions;
 /// </summary>
 /// <remarks>
 /// The gate is asynchronous and non-blocking: <see cref="RequestAsync"/> raises an approval request
-/// (emitted out-of-band as an event per ADR-0018 D8) and returns immediately with a
-/// <see cref="ApprovalOutcome.Pending"/> decision. Consumers poll <see cref="CheckStatusAsync"/> or
-/// subscribe to the approval-completed event to learn the final outcome.
+/// (emitted out-of-band as an approval-needed event per ADR-0018 D8) and returns immediately with a
+/// <see cref="ApprovalOutcome.Pending"/> decision. Consumers learn the final outcome by polling
+/// <see cref="CheckStatusAsync"/>; the emitted event signals only that approval is needed — there is
+/// no approval-completed event contract in v0.1.0.
 /// </remarks>
 public interface IApprovalGate
 {

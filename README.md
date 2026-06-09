@@ -50,8 +50,9 @@ the Audit Node (`IAuditLog`). See the runtime package README for host responsibi
 - **117** — cost tables, breaker thresholds, decision policies, and safety-filter config come from App
   Configuration via Vault.
 - **118** — approval notifications are event-out; no runtime dependency on Communications.
-- **119** — CI carries a contract-shape canary on `IApprovalGate`, `ICircuitBreaker`, `ICostGuard`,
-  `ISafetyFilter`.
+- **119** — CI carries a contract-shape canary over the entire `HoneyDrunk.Operator.Abstractions`
+  public surface (all five contracts — `IApprovalGate`, `ICircuitBreaker`, `ICostGuard`,
+  `IDecisionPolicy`, `ISafetyFilter` — and their supporting DTOs).
 
 ## Standup
 
