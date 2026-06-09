@@ -46,11 +46,11 @@ the Audit Node (`IAuditLog`). See the runtime package README for host responsibi
 
 ## Invariants
 
-- **54** — downstream Nodes depend only on `HoneyDrunk.Operator.Abstractions`.
-- **55** — cost tables, breaker thresholds, decision policies, and safety-filter config come from App
+- **116** — downstream Nodes depend only on `HoneyDrunk.Operator.Abstractions`.
+- **117** — cost tables, breaker thresholds, decision policies, and safety-filter config come from App
   Configuration via Vault.
-- **56** — approval notifications are event-out; no runtime dependency on Communications.
-- **57** — CI carries a contract-shape canary on `IApprovalGate`, `ICircuitBreaker`, `ICostGuard`,
+- **118** — approval notifications are event-out; no runtime dependency on Communications.
+- **119** — CI carries a contract-shape canary on `IApprovalGate`, `ICircuitBreaker`, `ICostGuard`,
   `ISafetyFilter`.
 
 ## Standup

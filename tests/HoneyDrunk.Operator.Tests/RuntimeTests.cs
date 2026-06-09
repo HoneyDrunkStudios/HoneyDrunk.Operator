@@ -17,13 +17,6 @@ namespace HoneyDrunk.Operator.Tests;
 /// <summary>Unit tests for the HoneyDrunk.Operator default runtime implementations.</summary>
 public sealed class RuntimeTests
 {
-    private static OperatorTelemetry Telemetry() => new(Substitute.For<ITelemetryActivityFactory>());
-
-    private static OperatorAuditWriter Audit() => new(Array.Empty<IAuditLog>());
-
-    private static IOptions<OperatorOptions> Options(OperatorOptions? options = null) =>
-        Microsoft.Extensions.Options.Options.Create(options ?? new OperatorOptions());
-
     /// <summary>The breaker walks Closed → Open → (after window) HalfOpen → Closed.</summary>
     [Fact]
     public async Task CircuitBreaker_walks_the_state_machine()
@@ -71,6 +64,8 @@ public sealed class RuntimeTests
     }
 
     /// <summary>The decision policy resolves Allow / Deny / RequireApproval from configuration.</summary>
+    /// <param name="configured">The policy value stored in configuration for the action.</param>
+    /// <param name="expected">The outcome the policy is expected to resolve.</param>
     [Theory]
     [InlineData("Allow", PolicyOutcome.Allow)]
     [InlineData("Deny", PolicyOutcome.Deny)]
@@ -135,4 +130,11 @@ public sealed class RuntimeTests
         Assert.False(writer.IsEnabled);
         await writer.WriteAsync("operator.test", "actor", AuditOutcome.Succeeded, AuditTarget.None);
     }
+
+    private static OperatorTelemetry Telemetry() => new(Substitute.For<ITelemetryActivityFactory>());
+
+    private static OperatorAuditWriter Audit() => new(Array.Empty<IAuditLog>());
+
+    private static IOptions<OperatorOptions> Options(OperatorOptions? options = null) =>
+        Microsoft.Extensions.Options.Options.Create(options ?? new OperatorOptions());
 }

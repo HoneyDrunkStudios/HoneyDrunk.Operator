@@ -10,15 +10,6 @@ namespace HoneyDrunk.Operator.Tests;
 /// <summary>Tests that <c>AddHoneyDrunkOperator</c> composes the full contract surface.</summary>
 public sealed class ServiceRegistrationTests
 {
-    private static ServiceProvider BuildProvider()
-    {
-        var services = new ServiceCollection();
-        services.AddSingleton(TestDoubles.ConfigProvider());
-        services.AddSingleton(Substitute.For<ITelemetryActivityFactory>());
-        services.AddHoneyDrunkOperator();
-        return services.BuildServiceProvider();
-    }
-
     /// <summary>All five Operator contracts resolve from the container.</summary>
     [Fact]
     public void All_five_contracts_resolve()
@@ -39,5 +30,14 @@ public sealed class ServiceRegistrationTests
         using var provider = BuildProvider();
         Assert.NotNull(provider.GetService<OperatorTelemetry>());
         Assert.False(provider.GetRequiredService<Audit.OperatorAuditWriter>().IsEnabled);
+    }
+
+    private static ServiceProvider BuildProvider()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(TestDoubles.ConfigProvider());
+        services.AddSingleton(Substitute.For<ITelemetryActivityFactory>());
+        services.AddHoneyDrunkOperator();
+        return services.BuildServiceProvider();
     }
 }

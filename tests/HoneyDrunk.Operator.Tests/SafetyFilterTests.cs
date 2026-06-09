@@ -10,11 +10,6 @@ namespace HoneyDrunk.Operator.Tests;
 /// <summary>Tests for the composable safety-filter rule chain.</summary>
 public sealed class SafetyFilterTests
 {
-    private static OperatorTelemetry Telemetry() => new(Substitute.For<ITelemetryActivityFactory>());
-
-    private static SafetyFilterRequest Request() =>
-        new("content", "chat-output", new Dictionary<string, string>());
-
     /// <summary>With no rules registered the filter is permissive.</summary>
     [Fact]
     public async Task Empty_chain_allows()
@@ -34,6 +29,11 @@ public sealed class SafetyFilterTests
         Assert.False(result.Allowed);
         Assert.Contains("always-fires", result.FiredRules);
     }
+
+    private static OperatorTelemetry Telemetry() => new(Substitute.For<ITelemetryActivityFactory>());
+
+    private static SafetyFilterRequest Request() =>
+        new("content", "chat-output", new Dictionary<string, string>());
 
     private sealed class AlwaysFiresRule : ISafetyRule
     {

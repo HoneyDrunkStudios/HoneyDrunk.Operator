@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <PackageId>HoneyDrunk.Operator.Testing</PackageId>
-    <Description>In-memory fixtures for composing HoneyDrunk.Operator contracts in tests and local development. Not for production composition (invariant 54).</Description>
+    <Description>In-memory fixtures for composing HoneyDrunk.Operator contracts in tests and local development. Not for production composition (invariant 116).</Description>
     <PackageTags>honeydrunk;operator;testing;fixtures;in-memory;grid</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
