@@ -9,7 +9,7 @@ namespace HoneyDrunk.Operator.Testing;
 /// </summary>
 public sealed class InMemoryCostGuard : ICostGuard
 {
-    private readonly ConcurrentDictionary<(string Scope, string Window), decimal> spend = new();
+    private readonly ConcurrentDictionary<(string scope, string window), decimal> spend = new();
 
     /// <summary>Gets or sets the per-scope budget applied to every window (<c>0</c> means unlimited).</summary>
     public decimal DefaultLimit { get; set; }
@@ -37,7 +37,7 @@ public sealed class InMemoryCostGuard : ICostGuard
     {
         ArgumentNullException.ThrowIfNull(costEvent);
         ArgumentOutOfRangeException.ThrowIfNegative(costEvent.Amount);
-        this.spend.AddOrUpdate((costEvent.AgentId, costEvent.Window), costEvent.Amount, (_, existing) => existing + costEvent.Amount);
+        this.spend.AddOrUpdate((scope: costEvent.AgentId, window: costEvent.Window), costEvent.Amount, (_, existing) => existing + costEvent.Amount);
         return Task.CompletedTask;
     }
 

@@ -39,7 +39,7 @@ public sealed class DefaultCostGuard(
     // TODO(data): back the accumulator with HoneyDrunk.Data's IRepository / IUnitOfWork for
     // durability across process restarts per ADR-0018 D12. Tracked as a follow-up packet.
     // Keyed by the (scope, window) tuple so delimiter-bearing scopes/windows can't collide.
-    private readonly ConcurrentDictionary<(string Scope, string Window), decimal> spend = new();
+    private readonly ConcurrentDictionary<(string scope, string window), decimal> spend = new();
 
     /// <inheritdoc />
     public async Task<CostCheckResult> CheckBudgetAsync(string scope, string window, decimal amount, CancellationToken cancellationToken = default)
@@ -80,7 +80,7 @@ public sealed class DefaultCostGuard(
         // and let a scope drift back under budget.
         ArgumentOutOfRangeException.ThrowIfNegative(costEvent.Amount);
         using var activity = this.telemetry.Start("cost-guard", "record");
-        this.spend.AddOrUpdate((costEvent.AgentId, costEvent.Window), costEvent.Amount, (_, existing) => existing + costEvent.Amount);
+        this.spend.AddOrUpdate((scope: costEvent.AgentId, window: costEvent.Window), costEvent.Amount, (_, existing) => existing + costEvent.Amount);
 
         await this.audit.WriteAsync(
             "operator.cost-guard.recorded",
