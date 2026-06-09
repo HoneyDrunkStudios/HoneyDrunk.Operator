@@ -37,21 +37,3 @@ public interface ICostGuard
     /// <returns>The current spend, limit, and remaining budget for the scope and window.</returns>
     Task<CostStatus> GetStatusAsync(string scope, string window, CancellationToken cancellationToken = default);
 }
-
-/// <summary>
-/// The outcome of a budget check.
-/// </summary>
-/// <param name="Allowed">Whether the proposed spend is permitted.</param>
-/// <param name="Remaining">The remaining budget after the proposed spend, when allowed.</param>
-/// <param name="Limit">The configured budget limit for the scope and window.</param>
-/// <param name="DenyReason">The reason the spend was denied, or <see langword="null"/> when allowed.</param>
-public sealed record CostCheckResult(bool Allowed, decimal Remaining, decimal Limit, string? DenyReason);
-
-/// <summary>
-/// The accumulated spend status for a scope and window.
-/// </summary>
-/// <param name="Spent">The amount spent so far in the window.</param>
-/// <param name="Limit">The configured budget limit.</param>
-/// <param name="Remaining">The remaining budget.</param>
-/// <param name="Window">The budget window the status describes.</param>
-public sealed record CostStatus(decimal Spent, decimal Limit, decimal Remaining, string Window);
