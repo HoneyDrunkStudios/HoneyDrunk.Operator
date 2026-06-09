@@ -19,14 +19,17 @@ namespace HoneyDrunk.Operator.Approval;
 /// <param name="emitter">The approval event emitter.</param>
 /// <param name="telemetry">The Operator telemetry helper.</param>
 /// <param name="audit">The Operator audit writer.</param>
+/// <param name="timeProvider">The clock used to stamp decisions and age out expiries (Grid clock policy).</param>
 public sealed class DefaultApprovalGate(
     ApprovalEventEmitter emitter,
     OperatorTelemetry telemetry,
-    OperatorAuditWriter audit) : IApprovalGate
+    OperatorAuditWriter audit,
+    TimeProvider timeProvider) : IApprovalGate
 {
     private readonly ApprovalEventEmitter emitter = emitter ?? throw new ArgumentNullException(nameof(emitter));
     private readonly OperatorTelemetry telemetry = telemetry ?? throw new ArgumentNullException(nameof(telemetry));
     private readonly OperatorAuditWriter audit = audit ?? throw new ArgumentNullException(nameof(audit));
+    private readonly TimeProvider timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
 
     // TODO(data): persist pending approvals via HoneyDrunk.Data's IRepository per ADR-0018 D12.
     private readonly ConcurrentDictionary<string, ApprovalDecision> decisions = new(StringComparer.Ordinal);
@@ -41,7 +44,7 @@ public sealed class DefaultApprovalGate(
         ArgumentNullException.ThrowIfNull(request);
         using var activity = this.telemetry.Start("approval-gate", "request");
 
-        var pending = new ApprovalDecision(request.ApprovalId, ApprovalOutcome.Pending, string.Empty, DateTimeOffset.UtcNow, null);
+        var pending = new ApprovalDecision(request.ApprovalId, ApprovalOutcome.Pending, string.Empty, this.timeProvider.GetUtcNow(), null);
         this.decisions[request.ApprovalId] = pending;
         this.expiries[request.ApprovalId] = request.Expiry;
 
@@ -73,7 +76,7 @@ public sealed class DefaultApprovalGate(
         // drop the expiry entry so it isn't recomputed on every later poll.
         if (decision.Outcome == ApprovalOutcome.Pending
             && this.expiries.TryGetValue(approvalId, out var expiry)
-            && DateTimeOffset.UtcNow > expiry)
+            && this.timeProvider.GetUtcNow() > expiry)
         {
             decision = decision with { Outcome = ApprovalOutcome.Expired, Reason = "Approval request expired before a decision was recorded." };
             this.decisions[approvalId] = decision;

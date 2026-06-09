@@ -25,7 +25,7 @@ public sealed class RuntimeTests
         {
             ["HoneyDrunk:Operator:Breaker:svc:ResetWindowSeconds"] = "0",
         });
-        var breaker = new DefaultCircuitBreaker(config, Options(), Telemetry(), Audit());
+        var breaker = new DefaultCircuitBreaker(config, Options(), Telemetry(), Audit(), Clock());
 
         Assert.True(await breaker.IsAllowedAsync("svc"));
         Assert.Equal(BreakerState.Closed, await breaker.GetStateAsync("svc"));
@@ -97,9 +97,10 @@ public sealed class RuntimeTests
     {
         var sink = Substitute.For<IApprovalEventSink>();
         var emitter = new ApprovalEventEmitter(sink, Telemetry());
-        var gate = new DefaultApprovalGate(emitter, Telemetry(), Audit());
+        var clock = Clock();
+        var gate = new DefaultApprovalGate(emitter, Telemetry(), Audit(), clock);
 
-        var request = new ApprovalRequest("a1", "subject", "deploy", new Dictionary<string, string>(), "scope", DateTimeOffset.UtcNow.AddMinutes(5), "corr");
+        var request = new ApprovalRequest("a1", "subject", "deploy", new Dictionary<string, string>(), "scope", clock.GetUtcNow().AddMinutes(5), "corr");
         var decision = await gate.RequestAsync(request);
 
         Assert.Equal(ApprovalOutcome.Pending, decision.Outcome);
@@ -165,11 +166,17 @@ public sealed class RuntimeTests
     public async Task ApprovalGate_reports_expired_after_expiry_passes()
     {
         var emitter = new ApprovalEventEmitter(Substitute.For<IApprovalEventSink>(), Telemetry());
-        var gate = new DefaultApprovalGate(emitter, Telemetry(), Audit());
+        var clock = Clock();
+        var gate = new DefaultApprovalGate(emitter, Telemetry(), Audit(), clock);
 
-        var request = new ApprovalRequest("a1", "subject", "deploy", new Dictionary<string, string>(), "scope", DateTimeOffset.UtcNow.AddMinutes(-1), "corr");
+        var request = new ApprovalRequest("a1", "subject", "deploy", new Dictionary<string, string>(), "scope", clock.GetUtcNow().AddMinutes(5), "corr");
         await gate.RequestAsync(request);
 
+        // Before the expiry passes the request is still pending...
+        Assert.Equal(ApprovalOutcome.Pending, (await gate.CheckStatusAsync("a1"))!.Outcome);
+
+        // ...and advancing the clock past the expiry ages it to Expired deterministically.
+        clock.Advance(TimeSpan.FromMinutes(6));
         var status = await gate.CheckStatusAsync("a1");
         Assert.NotNull(status);
         Assert.Equal(ApprovalOutcome.Expired, status!.Outcome);
@@ -184,7 +191,7 @@ public sealed class RuntimeTests
             ["HoneyDrunk:Operator:Breaker:svc:ResetWindowSeconds"] = "0",
             ["HoneyDrunk:Operator:Breaker:svc:HalfOpenTrialCount"] = "2",
         });
-        var breaker = new DefaultCircuitBreaker(config, Options(), Telemetry(), Audit());
+        var breaker = new DefaultCircuitBreaker(config, Options(), Telemetry(), Audit(), Clock());
 
         await breaker.TripAsync("svc", "failures");
 
@@ -204,4 +211,16 @@ public sealed class RuntimeTests
 
     private static IOptions<OperatorOptions> Options(OperatorOptions? options = null) =>
         Microsoft.Extensions.Options.Options.Create(options ?? new OperatorOptions());
+
+    private static MutableTimeProvider Clock() => new(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+
+    /// <summary>A <see cref="TimeProvider"/> whose current instant can be advanced by tests.</summary>
+    private sealed class MutableTimeProvider(DateTimeOffset start) : TimeProvider
+    {
+        private DateTimeOffset now = start;
+
+        public override DateTimeOffset GetUtcNow() => this.now;
+
+        public void Advance(TimeSpan delta) => this.now += delta;
+    }
 }

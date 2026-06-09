@@ -31,6 +31,10 @@ All notable changes to this package are documented here. The format follows
 - Telemetry consistency: `DefaultCostGuard.GetStatusAsync`, `DefaultCircuitBreaker.GetStateAsync`, and
   `DefaultApprovalGate.CheckStatusAsync` now open telemetry activities like their sibling operations;
   `CheckStatusAsync` also persists the Expired transition once instead of recomputing it per poll.
+- Clock policy: `DefaultApprovalGate` (decision stamping, expiry aging) and `DefaultCircuitBreaker`
+  (reset-window timing) read time via an injected `TimeProvider` instead of `DateTimeOffset.UtcNow`.
+  `AddHoneyDrunkOperator()` registers `TimeProvider.System` (TryAdd, so a host-supplied clock wins),
+  making breaker recovery and approval expiry deterministically testable.
 
 ### Deferred
 

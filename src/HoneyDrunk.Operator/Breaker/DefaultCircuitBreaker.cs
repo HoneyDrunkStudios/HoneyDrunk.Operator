@@ -18,16 +18,19 @@ namespace HoneyDrunk.Operator.Breaker;
 /// <param name="options">Startup fallback options.</param>
 /// <param name="telemetry">The Operator telemetry helper.</param>
 /// <param name="audit">The Operator audit writer.</param>
+/// <param name="timeProvider">The clock used for reset-window timing (Grid clock policy).</param>
 public sealed class DefaultCircuitBreaker(
     IConfigProvider config,
     IOptions<OperatorOptions> options,
     OperatorTelemetry telemetry,
-    OperatorAuditWriter audit) : ICircuitBreaker
+    OperatorAuditWriter audit,
+    TimeProvider timeProvider) : ICircuitBreaker
 {
     private readonly IConfigProvider config = config ?? throw new ArgumentNullException(nameof(config));
     private readonly OperatorOptions options = (options ?? throw new ArgumentNullException(nameof(options))).Value;
     private readonly OperatorTelemetry telemetry = telemetry ?? throw new ArgumentNullException(nameof(telemetry));
     private readonly OperatorAuditWriter audit = audit ?? throw new ArgumentNullException(nameof(audit));
+    private readonly TimeProvider timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
     private readonly ConcurrentDictionary<string, BreakerEntry> entries = new(StringComparer.Ordinal);
 
     /// <inheritdoc />
@@ -41,7 +44,7 @@ public sealed class DefaultCircuitBreaker(
 
         lock (entry.Gate)
         {
-            if (entry.State == BreakerState.Open && DateTimeOffset.UtcNow - entry.OpenedAt >= TimeSpan.FromSeconds(resetWindow))
+            if (entry.State == BreakerState.Open && this.timeProvider.GetUtcNow() - entry.OpenedAt >= TimeSpan.FromSeconds(resetWindow))
             {
                 // Reset window elapsed: admit a bounded number of trial calls to probe recovery.
                 entry.State = BreakerState.HalfOpen;
@@ -78,7 +81,7 @@ public sealed class DefaultCircuitBreaker(
         lock (entry.Gate)
         {
             entry.State = BreakerState.Open;
-            entry.OpenedAt = DateTimeOffset.UtcNow;
+            entry.OpenedAt = this.timeProvider.GetUtcNow();
         }
 
         await this.audit.WriteAsync(

@@ -8,6 +8,7 @@ using HoneyDrunk.Operator.Policy;
 using HoneyDrunk.Operator.Safety;
 using HoneyDrunk.Operator.Telemetry;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace HoneyDrunk.Operator;
 
@@ -36,6 +37,10 @@ public static class ServiceCollectionExtensions
         {
             services.Configure(configure);
         }
+
+        // Clock policy: runtime components read time via TimeProvider, never DateTimeOffset.UtcNow.
+        // TryAdd so a host that composes its own (e.g. a test FakeTimeProvider) wins.
+        services.TryAddSingleton(TimeProvider.System);
 
         services.AddSingleton<OperatorTelemetry>();
         services.AddSingleton<OperatorAuditWriter>();
