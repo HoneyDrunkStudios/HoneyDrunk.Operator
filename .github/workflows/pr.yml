@@ -3,6 +3,8 @@ name: PR
 on:
   pull_request:
     branches: [ main ]
+  push:
+    branches: [ main ]
 
 permissions:
   contents: read
@@ -21,12 +23,12 @@ jobs:
   pr-core:
     name: PR Core
     needs: preflight
-    if: needs.preflight.outputs['project-exists'] == 'true'
+    if: github.event_name == 'pull_request' && needs.preflight.outputs['project-exists'] == 'true'
     permissions:
       contents: read
       checks: write
-      issues: write
       pull-requests: write
+      issues: write
       security-events: write
     uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/pr-core.yml@main
     with:
@@ -40,4 +42,36 @@ jobs:
       post-pr-summary: true
       actions-ref: 'main'
     secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  sonarcloud:
+    name: SonarQube Cloud
+    needs: [preflight, pr-core]
+    # Runs on:
+    #   - pull_request (same-repo, after pr-core succeeds) for PR-time analysis
+    #   - push to main (standalone, after preflight) for main-branch analysis
+    #     that populates the SonarCloud Overview dashboard and leak-period baseline.
+    # `always()` is required because pr-core is skipped on push events; without
+    # it, GitHub Actions skips downstream jobs whose declared `needs:` was skipped.
+    # Preflight gate stays so a missing solution scaffold still skips analysis cleanly.
+    if: |
+      always() && needs.preflight.outputs['project-exists'] == 'true' && (
+        (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.pr-core.result == 'success') ||
+        (github.event_name == 'push' && github.ref == 'refs/heads/main')
+      )
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-sonarcloud.yml@main
+    with:
+      dotnet-version: '10.0.x'
+      runs-on: 'ubuntu-latest'
+      working-directory: '.'
+      project-path: './HoneyDrunk.Operator.slnx'
+      sonar-organization: 'honeydrunkstudios'
+      sonar-project-key: 'honeydrunkstudios_HoneyDrunk.Operator'
+      coverage-artifact-name: 'coverage-reports-ubuntu-latest'
+    secrets:
+      sonar-token: ${{ secrets.SONAR_TOKEN }}
       github-token: ${{ secrets.GITHUB_TOKEN }}

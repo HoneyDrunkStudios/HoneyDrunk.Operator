@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <PackageId>HoneyDrunk.Operator.Abstractions</PackageId>
+    <Description>Dependency-light contracts for HoneyDrunk.Operator — the AI sector's human-policy enforcement substrate (approval gates, circuit breakers, cost guards, decision policy, safety filters).</Description>
+    <PackageTags>honeydrunk;operator;abstractions;contracts;safety;approval;circuit-breaker;cost;policy;grid</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="HoneyDrunk.Standards" Version="0.2.9" PrivateAssets="all" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+    <None Include="CHANGELOG.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+</Project>

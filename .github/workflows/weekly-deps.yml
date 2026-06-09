@@ -2,13 +2,11 @@ name: Weekly Dependencies
 
 on:
   schedule:
-    - cron: '35 3 * * 1'
+    - cron: '10 3 * * 1'
   workflow_dispatch:
 
 permissions:
-  contents: write
-  pull-requests: write
-  issues: write
+  contents: read
 
 jobs:
   preflight:
@@ -25,6 +23,10 @@ jobs:
     name: Weekly Dependencies
     needs: preflight
     if: needs.preflight.outputs['project-exists'] == 'true'
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
     uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/nightly-deps.yml@main
     with:
       dotnet-version: '10.0.x'
