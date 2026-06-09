@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/HoneyDrunk.Operator.Abstractions/HoneyDrunk.Operator.Abstractions.csproj" />
+    <Project Path="src/HoneyDrunk.Operator/HoneyDrunk.Operator.csproj" />
+    <Project Path="src/HoneyDrunk.Operator.Testing/HoneyDrunk.Operator.Testing.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/HoneyDrunk.Operator.Abstractions.Tests/HoneyDrunk.Operator.Abstractions.Tests.csproj" />
+    <Project Path="tests/HoneyDrunk.Operator.Tests/HoneyDrunk.Operator.Tests.csproj" />
+    <Project Path="tests/HoneyDrunk.Operator.Testing.Tests/HoneyDrunk.Operator.Testing.Tests.csproj" />
+  </Folder>
+</Solution>

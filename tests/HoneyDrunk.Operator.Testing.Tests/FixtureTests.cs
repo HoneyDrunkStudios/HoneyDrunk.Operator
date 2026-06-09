@@ -1,0 +1,80 @@
+using HoneyDrunk.Operator.Abstractions;
+using Xunit;
+
+namespace HoneyDrunk.Operator.Testing.Tests;
+
+/// <summary>Smoke tests for the in-memory Operator fixtures.</summary>
+public sealed class FixtureTests
+{
+    // Fixed instant for fixture data; the exact value is irrelevant and a literal keeps these tests
+    // off the system clock (Grid clock policy).
+    private static readonly DateTimeOffset SampleInstant = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+
+    /// <summary>The in-memory approval gate records requests and returns the configured outcome.</summary>
+    [Fact]
+    public async Task ApprovalGate_records_and_returns_configured_outcome()
+    {
+        var gate = new InMemoryApprovalGate { DefaultOutcome = ApprovalOutcome.Denied };
+        var request = new ApprovalRequest("a1", "s", "act", new Dictionary<string, string>(), "scope", SampleInstant, "corr");
+
+        var decision = await gate.RequestAsync(request);
+        Assert.Equal(ApprovalOutcome.Denied, decision.Outcome);
+        Assert.Single(gate.ReceivedRequests);
+        Assert.Equal(decision.Outcome, (await gate.CheckStatusAsync("a1"))!.Outcome);
+    }
+
+    /// <summary>The in-memory breaker honors trip and reset.</summary>
+    [Fact]
+    public async Task CircuitBreaker_honors_trip_and_reset()
+    {
+        var breaker = new InMemoryCircuitBreaker();
+        Assert.True(await breaker.IsAllowedAsync("svc"));
+        await breaker.TripAsync("svc", "reason");
+        Assert.False(await breaker.IsAllowedAsync("svc"));
+        await breaker.ResetAsync("svc");
+        Assert.True(await breaker.IsAllowedAsync("svc"));
+    }
+
+    /// <summary>The in-memory cost guard accumulates and enforces the supplied budget.</summary>
+    [Fact]
+    public async Task CostGuard_enforces_supplied_budget()
+    {
+        var guard = new InMemoryCostGuard { DefaultLimit = 10m };
+        await guard.RecordAsync(new CostEvent("e1", "agent", "t", "daily", 8m, "usd", "model", SampleInstant, "corr"));
+        var result = await guard.CheckBudgetAsync("agent", "daily", 5m);
+        Assert.False(result.Allowed);
+    }
+
+    /// <summary>The in-memory cost guard rejects negative amounts like the production guard.</summary>
+    [Fact]
+    public async Task CostGuard_rejects_negative_amounts()
+    {
+        var guard = new InMemoryCostGuard { DefaultLimit = 10m };
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => guard.CheckBudgetAsync("agent", "daily", -1m));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            guard.RecordAsync(new CostEvent("e1", "agent", "t", "daily", -1m, "usd", "model", SampleInstant, "corr")));
+    }
+
+    /// <summary>Reported remaining budget never goes negative once spend exceeds the limit, matching production.</summary>
+    [Fact]
+    public async Task CostGuard_status_remaining_is_clamped_to_zero()
+    {
+        var guard = new InMemoryCostGuard { DefaultLimit = 10m };
+        await guard.RecordAsync(new CostEvent("e1", "agent", "t", "daily", 12m, "usd", "model", SampleInstant, "corr"));
+
+        var status = await guard.GetStatusAsync("agent", "daily");
+        Assert.Equal(12m, status.Spent);
+        Assert.Equal(0m, status.Remaining);
+    }
+
+    /// <summary>The permissive policy and safety filter always allow.</summary>
+    [Fact]
+    public async Task Permissive_fixtures_allow()
+    {
+        var policy = await new PermissiveDecisionPolicy().EvaluateAsync(new ActionContext("a", "act", "r", new Dictionary<string, string>()));
+        Assert.Equal(PolicyOutcome.Allow, policy.Outcome);
+
+        var safety = await new PermissiveSafetyFilter().CheckAsync(new SafetyFilterRequest("c", "k", new Dictionary<string, string>()));
+        Assert.True(safety.Allowed);
+    }
+}

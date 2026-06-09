@@ -1,0 +1,55 @@
+using HoneyDrunk.Operator.Abstractions;
+using System.Collections.Concurrent;
+
+namespace HoneyDrunk.Operator.Testing;
+
+/// <summary>
+/// In-memory <see cref="ICostGuard"/> for tests. Accumulates spend with a caller-supplied per-scope
+/// budget (<see cref="DefaultLimit"/>, or <c>0</c> for unlimited).
+/// </summary>
+public sealed class InMemoryCostGuard : ICostGuard
+{
+    private readonly ConcurrentDictionary<(string scope, string window), decimal> spend = new();
+
+    /// <summary>Gets or sets the per-scope budget applied to every window (<c>0</c> means unlimited).</summary>
+    public decimal DefaultLimit { get; set; }
+
+    /// <inheritdoc />
+    public Task<CostCheckResult> CheckBudgetAsync(string scope, string window, decimal amount, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(scope);
+        ArgumentException.ThrowIfNullOrWhiteSpace(window);
+
+        // Mirror production semantics: cost is non-negative so a fixture can't slip under budget.
+        ArgumentOutOfRangeException.ThrowIfNegative(amount);
+        var current = this.spend.GetValueOrDefault((scope, window));
+        var projected = current + amount;
+        if (this.DefaultLimit > 0m && projected > this.DefaultLimit)
+        {
+            return Task.FromResult(new CostCheckResult(false, Math.Max(0m, this.DefaultLimit - current), this.DefaultLimit, "Budget exceeded."));
+        }
+
+        return Task.FromResult(new CostCheckResult(true, this.DefaultLimit > 0m ? this.DefaultLimit - projected : decimal.MaxValue, this.DefaultLimit, null));
+    }
+
+    /// <inheritdoc />
+    public Task RecordAsync(CostEvent costEvent, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(costEvent);
+        ArgumentOutOfRangeException.ThrowIfNegative(costEvent.Amount);
+        this.spend.AddOrUpdate((scope: costEvent.AgentId, window: costEvent.Window), costEvent.Amount, (_, existing) => existing + costEvent.Amount);
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    public Task<CostStatus> GetStatusAsync(string scope, string window, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(scope);
+        ArgumentException.ThrowIfNullOrWhiteSpace(window);
+        var current = this.spend.GetValueOrDefault((scope, window));
+
+        // Clamp reported remaining to zero once spend exceeds the limit, matching DefaultCostGuard so
+        // a fixture never hands a consumer a negative remaining budget.
+        return Task.FromResult(new CostStatus(current, this.DefaultLimit, this.DefaultLimit > 0m ? Math.Max(0m, this.DefaultLimit - current) : decimal.MaxValue, window));
+    }
+}

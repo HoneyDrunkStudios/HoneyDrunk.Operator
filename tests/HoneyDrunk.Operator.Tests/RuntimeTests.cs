@@ -1,0 +1,226 @@
+using HoneyDrunk.Audit.Abstractions;
+using HoneyDrunk.Kernel.Abstractions.Telemetry;
+using HoneyDrunk.Operator.Abstractions;
+using HoneyDrunk.Operator.Approval;
+using HoneyDrunk.Operator.Audit;
+using HoneyDrunk.Operator.Breaker;
+using HoneyDrunk.Operator.Cost;
+using HoneyDrunk.Operator.Events;
+using HoneyDrunk.Operator.Policy;
+using HoneyDrunk.Operator.Telemetry;
+using Microsoft.Extensions.Options;
+using NSubstitute;
+using Xunit;
+
+namespace HoneyDrunk.Operator.Tests;
+
+/// <summary>Unit tests for the HoneyDrunk.Operator default runtime implementations.</summary>
+public sealed class RuntimeTests
+{
+    /// <summary>The breaker walks Closed → Open → (after window) HalfOpen → Closed.</summary>
+    [Fact]
+    public async Task CircuitBreaker_walks_the_state_machine()
+    {
+        var config = TestDoubles.ConfigProvider(new Dictionary<string, string>
+        {
+            ["HoneyDrunk:Operator:Breaker:svc:ResetWindowSeconds"] = "0",
+        });
+        var breaker = new DefaultCircuitBreaker(config, Options(), Telemetry(), Audit(), Clock());
+
+        Assert.True(await breaker.IsAllowedAsync("svc"));
+        Assert.Equal(BreakerState.Closed, await breaker.GetStateAsync("svc"));
+
+        await breaker.TripAsync("svc", "too many failures");
+        Assert.Equal(BreakerState.Open, await breaker.GetStateAsync("svc"));
+
+        // Reset window is 0 seconds, so the next allowed-check transitions to HalfOpen.
+        Assert.True(await breaker.IsAllowedAsync("svc"));
+        Assert.Equal(BreakerState.HalfOpen, await breaker.GetStateAsync("svc"));
+
+        await breaker.ResetAsync("svc");
+        Assert.Equal(BreakerState.Closed, await breaker.GetStateAsync("svc"));
+    }
+
+    /// <summary>The cost guard accumulates spend and denies once the configured budget is exceeded.</summary>
+    [Fact]
+    public async Task CostGuard_accumulates_and_denies_over_budget()
+    {
+        var config = TestDoubles.ConfigProvider(new Dictionary<string, string>
+        {
+            ["HoneyDrunk:Operator:Budget:agent:daily"] = "10",
+        });
+        var guard = new DefaultCostGuard(config, Options(), Telemetry(), Audit());
+
+        var first = await guard.CheckBudgetAsync("agent", "daily", 6m);
+        Assert.True(first.Allowed);
+
+        await guard.RecordAsync(new CostEvent("e1", "agent", "tenant", "daily", 6m, "usd", "model", Clock().GetUtcNow(), "corr"));
+        var status = await guard.GetStatusAsync("agent", "daily");
+        Assert.Equal(6m, status.Spent);
+
+        var over = await guard.CheckBudgetAsync("agent", "daily", 5m);
+        Assert.False(over.Allowed);
+        Assert.NotNull(over.DenyReason);
+    }
+
+    /// <summary>The decision policy resolves Allow / Deny / RequireApproval from configuration.</summary>
+    /// <param name="configured">The policy value stored in configuration for the action.</param>
+    /// <param name="expected">The outcome the policy is expected to resolve.</param>
+    [Theory]
+    [InlineData("Allow", PolicyOutcome.Allow)]
+    [InlineData("Deny", PolicyOutcome.Deny)]
+    [InlineData("RequireApproval", PolicyOutcome.RequireApproval)]
+    public async Task DecisionPolicy_resolves_outcome_from_config(string configured, PolicyOutcome expected)
+    {
+        var config = TestDoubles.ConfigProvider(new Dictionary<string, string>
+        {
+            ["HoneyDrunk:Operator:Policy:deploy"] = configured,
+        });
+        var policy = new AuthBackedDecisionPolicy(config, Options(), Telemetry());
+
+        var decision = await policy.EvaluateAsync(new ActionContext("actor", "deploy", "resource", new Dictionary<string, string>()));
+        Assert.Equal(expected, decision.Outcome);
+    }
+
+    /// <summary>Unknown actions fail safe to RequireApproval.</summary>
+    [Fact]
+    public async Task DecisionPolicy_defaults_unknown_action_to_require_approval()
+    {
+        var policy = new AuthBackedDecisionPolicy(TestDoubles.ConfigProvider(), Options(), Telemetry());
+        var decision = await policy.EvaluateAsync(new ActionContext("actor", "unmapped", "resource", new Dictionary<string, string>()));
+        Assert.Equal(PolicyOutcome.RequireApproval, decision.Outcome);
+    }
+
+    /// <summary>The approval gate emits an event and returns a pending decision that is queryable.</summary>
+    [Fact]
+    public async Task ApprovalGate_emits_event_and_tracks_pending()
+    {
+        var sink = Substitute.For<IApprovalEventSink>();
+        var emitter = new ApprovalEventEmitter(sink, Telemetry());
+        var clock = Clock();
+        var gate = new DefaultApprovalGate(emitter, Telemetry(), Audit(), clock);
+
+        var request = new ApprovalRequest("a1", "subject", "deploy", new Dictionary<string, string>(), "scope", clock.GetUtcNow().AddMinutes(5), "corr");
+        var decision = await gate.RequestAsync(request);
+
+        Assert.Equal(ApprovalOutcome.Pending, decision.Outcome);
+        await sink.Received(1).EmitApprovalNeededAsync(request, Arg.Any<CancellationToken>());
+
+        var status = await gate.CheckStatusAsync("a1");
+        Assert.NotNull(status);
+        Assert.Equal(ApprovalOutcome.Pending, status!.Outcome);
+    }
+
+    /// <summary>The audit writer appends to every registered sink when one is composed.</summary>
+    [Fact]
+    public async Task AuditWriter_appends_when_sink_present()
+    {
+        var log = Substitute.For<IAuditLog>();
+        var writer = new OperatorAuditWriter([log]);
+        Assert.True(writer.IsEnabled);
+
+        await writer.WriteAsync("operator.test", "actor", AuditOutcome.Succeeded, new AuditTarget("kind", "id"));
+        await log.Received(1).AppendAsync(Arg.Any<AuditEntry>(), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>With no audit sink composed, emission is a no-op rather than a failure.</summary>
+    [Fact]
+    public async Task AuditWriter_is_noop_when_no_sink()
+    {
+        var writer = new OperatorAuditWriter(Array.Empty<IAuditLog>());
+        Assert.False(writer.IsEnabled);
+        await writer.WriteAsync("operator.test", "actor", AuditOutcome.Succeeded, AuditTarget.None);
+    }
+
+    /// <summary>Negative cost is rejected on both the check and record paths so budgets cannot be bypassed.</summary>
+    [Fact]
+    public async Task CostGuard_rejects_negative_amounts()
+    {
+        var guard = new DefaultCostGuard(TestDoubles.ConfigProvider(), Options(), Telemetry(), Audit());
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => guard.CheckBudgetAsync("agent", "daily", -1m));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            guard.RecordAsync(new CostEvent("e1", "agent", "tenant", "daily", -1m, "usd", "model", Clock().GetUtcNow(), "corr")));
+    }
+
+    /// <summary>A negative configured budget is rejected and falls back to the default, not treated as unlimited.</summary>
+    [Fact]
+    public async Task CostGuard_negative_configured_limit_falls_back_to_default()
+    {
+        var config = TestDoubles.ConfigProvider(new Dictionary<string, string>
+        {
+            ["HoneyDrunk:Operator:Budget:agent:daily"] = "-5",
+        });
+        var guard = new DefaultCostGuard(config, Options(new OperatorOptions { DefaultBudgetLimit = 10m }), Telemetry(), Audit());
+
+        // A negative config value must not read as "unlimited"; the default limit (10) still enforces.
+        var over = await guard.CheckBudgetAsync("agent", "daily", 12m);
+        Assert.False(over.Allowed);
+
+        var status = await guard.GetStatusAsync("agent", "daily");
+        Assert.Equal(10m, status.Limit);
+    }
+
+    /// <summary>A pending approval whose expiry has passed is reported as Expired, never Pending forever.</summary>
+    [Fact]
+    public async Task ApprovalGate_reports_expired_after_expiry_passes()
+    {
+        var emitter = new ApprovalEventEmitter(Substitute.For<IApprovalEventSink>(), Telemetry());
+        var clock = Clock();
+        var gate = new DefaultApprovalGate(emitter, Telemetry(), Audit(), clock);
+
+        var request = new ApprovalRequest("a1", "subject", "deploy", new Dictionary<string, string>(), "scope", clock.GetUtcNow().AddMinutes(5), "corr");
+        await gate.RequestAsync(request);
+
+        // Before the expiry passes the request is still pending...
+        Assert.Equal(ApprovalOutcome.Pending, (await gate.CheckStatusAsync("a1"))!.Outcome);
+
+        // ...and advancing the clock past the expiry ages it to Expired deterministically.
+        clock.Advance(TimeSpan.FromMinutes(6));
+        var status = await gate.CheckStatusAsync("a1");
+        Assert.NotNull(status);
+        Assert.Equal(ApprovalOutcome.Expired, status!.Outcome);
+    }
+
+    /// <summary>HalfOpen admits only the configured trial budget, then denies until the probe is resolved.</summary>
+    [Fact]
+    public async Task CircuitBreaker_half_open_limits_trial_calls()
+    {
+        var config = TestDoubles.ConfigProvider(new Dictionary<string, string>
+        {
+            ["HoneyDrunk:Operator:Breaker:svc:ResetWindowSeconds"] = "0",
+            ["HoneyDrunk:Operator:Breaker:svc:HalfOpenTrialCount"] = "2",
+        });
+        var breaker = new DefaultCircuitBreaker(config, Options(), Telemetry(), Audit(), Clock());
+
+        await breaker.TripAsync("svc", "failures");
+
+        // Reset window is 0s, so the first probe transitions to HalfOpen and admits two trials.
+        Assert.True(await breaker.IsAllowedAsync("svc"));
+        Assert.Equal(BreakerState.HalfOpen, await breaker.GetStateAsync("svc"));
+        Assert.True(await breaker.IsAllowedAsync("svc"));
+
+        // Trial budget exhausted: further calls are denied while still HalfOpen.
+        Assert.False(await breaker.IsAllowedAsync("svc"));
+        Assert.Equal(BreakerState.HalfOpen, await breaker.GetStateAsync("svc"));
+    }
+
+    private static OperatorTelemetry Telemetry() => new(Substitute.For<ITelemetryActivityFactory>());
+
+    private static OperatorAuditWriter Audit() => new(Array.Empty<IAuditLog>());
+
+    private static IOptions<OperatorOptions> Options(OperatorOptions? options = null) =>
+        Microsoft.Extensions.Options.Options.Create(options ?? new OperatorOptions());
+
+    private static MutableTimeProvider Clock() => new(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+
+    /// <summary>A <see cref="TimeProvider"/> whose current instant can be advanced by tests.</summary>
+    private sealed class MutableTimeProvider(DateTimeOffset start) : TimeProvider
+    {
+        private DateTimeOffset now = start;
+
+        public override DateTimeOffset GetUtcNow() => this.now;
+
+        public void Advance(TimeSpan delta) => this.now += delta;
+    }
+}

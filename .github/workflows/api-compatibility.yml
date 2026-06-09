@@ -1,0 +1,18 @@
+name: API Compatibility (Abstractions)
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'src/HoneyDrunk.Operator.Abstractions/**'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  abstractions-shape:
+    name: Abstractions Shape
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-api-compatibility.yml@main
+    with:
+      project-path: src/HoneyDrunk.Operator.Abstractions/HoneyDrunk.Operator.Abstractions.csproj
