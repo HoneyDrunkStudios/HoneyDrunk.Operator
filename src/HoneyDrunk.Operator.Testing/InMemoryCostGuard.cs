@@ -19,11 +19,14 @@ public sealed class InMemoryCostGuard : ICostGuard
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(scope);
         ArgumentException.ThrowIfNullOrWhiteSpace(window);
+
+        // Mirror production semantics: cost is non-negative so a fixture can't slip under budget.
+        ArgumentOutOfRangeException.ThrowIfNegative(amount);
         var current = this.spend.GetValueOrDefault(Key(scope, window));
         var projected = current + amount;
         if (this.DefaultLimit > 0m && projected > this.DefaultLimit)
         {
-            return Task.FromResult(new CostCheckResult(false, this.DefaultLimit - current, this.DefaultLimit, "Budget exceeded."));
+            return Task.FromResult(new CostCheckResult(false, Math.Max(0m, this.DefaultLimit - current), this.DefaultLimit, "Budget exceeded."));
         }
 
         return Task.FromResult(new CostCheckResult(true, this.DefaultLimit > 0m ? this.DefaultLimit - projected : decimal.MaxValue, this.DefaultLimit, null));
@@ -33,6 +36,7 @@ public sealed class InMemoryCostGuard : ICostGuard
     public Task RecordAsync(CostEvent costEvent, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(costEvent);
+        ArgumentOutOfRangeException.ThrowIfNegative(costEvent.Amount);
         this.spend.AddOrUpdate(Key(costEvent.AgentId, costEvent.Window), costEvent.Amount, (_, existing) => existing + costEvent.Amount);
         return Task.CompletedTask;
     }

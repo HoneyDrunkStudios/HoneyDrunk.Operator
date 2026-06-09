@@ -42,6 +42,10 @@ public sealed class DefaultCostGuard(
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(scope);
         ArgumentException.ThrowIfNullOrWhiteSpace(window);
+
+        // A negative projected charge would reduce accumulated spend and could be used to slip
+        // under a budget; cost is non-negative by contract.
+        ArgumentOutOfRangeException.ThrowIfNegative(amount);
         using var activity = this.telemetry.Start("cost-guard", "check-budget");
 
         var limit = await this.ReadLimitAsync(scope, window, cancellationToken).ConfigureAwait(false);
@@ -57,7 +61,7 @@ public sealed class DefaultCostGuard(
                 new AuditTarget("cost-scope", scope),
                 $"Projected spend {projected} exceeds limit {limit} for window {window}.",
                 cancellationToken: cancellationToken).ConfigureAwait(false);
-            return new CostCheckResult(false, limit - current, limit, $"Budget exceeded for scope '{scope}' in window '{window}'.");
+            return new CostCheckResult(false, Math.Max(0m, limit - current), limit, $"Budget exceeded for scope '{scope}' in window '{window}'.");
         }
 
         return new CostCheckResult(true, limit > 0m ? limit - projected : decimal.MaxValue, limit, null);
@@ -67,6 +71,10 @@ public sealed class DefaultCostGuard(
     public async Task RecordAsync(CostEvent costEvent, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(costEvent);
+
+        // Recorded spend is non-negative; a negative amount would subtract from the accumulator
+        // and let a scope drift back under budget.
+        ArgumentOutOfRangeException.ThrowIfNegative(costEvent.Amount);
         using var activity = this.telemetry.Start("cost-guard", "record");
         this.spend.AddOrUpdate(Key(costEvent.AgentId, costEvent.Window), costEvent.Amount, (_, existing) => existing + costEvent.Amount);
 

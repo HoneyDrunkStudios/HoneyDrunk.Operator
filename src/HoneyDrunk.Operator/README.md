@@ -36,9 +36,11 @@ Plus `OperatorTelemetry` (Kernel `ITelemetryActivityFactory`), `OperatorAuditWri
 
 ## Standards notes
 
-- Per invariants 1/2, the runtime references peer Nodes' **`.Abstractions`** packages only
-  (`HoneyDrunk.Kernel.Abstractions`, `HoneyDrunk.Vault.Abstractions`, `HoneyDrunk.Audit.Abstractions`),
-  never their runtime packages.
+- Per invariants 1/2, the runtime references peer Nodes' contract surfaces, never their runtime
+  composition: `HoneyDrunk.Kernel.Abstractions` and `HoneyDrunk.Audit.Abstractions`. Vault does not
+  yet publish a standalone `.Abstractions` package, so `IConfigProvider` (namespace
+  `HoneyDrunk.Vault.Abstractions`) is consumed from the `HoneyDrunk.Vault` package — the contract
+  type only; no Vault runtime services are composed here.
 - **v0.1.0 deferrals:** the `AuthBackedDecisionPolicy` → HoneyDrunk.Auth delegation (ADR-0018 D5) and
   durable persistence of cost/approval state (HoneyDrunk.Data, ADR-0018 D12) are marked with
   `TODO(auth)` / `TODO(data)` and land in follow-up packets. The v0.1.0 defaults are config-sourced

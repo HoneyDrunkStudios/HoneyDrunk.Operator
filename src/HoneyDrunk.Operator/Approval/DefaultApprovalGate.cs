@@ -31,6 +31,10 @@ public sealed class DefaultApprovalGate(
     // TODO(data): persist pending approvals via HoneyDrunk.Data's IRepository per ADR-0018 D12.
     private readonly ConcurrentDictionary<string, ApprovalDecision> decisions = new(StringComparer.Ordinal);
 
+    // Expiry is carried on the request, not the decision, so a pending decision can be aged out
+    // to Expired on read. Held alongside the decision until durable persistence lands.
+    private readonly ConcurrentDictionary<string, DateTimeOffset> expiries = new(StringComparer.Ordinal);
+
     /// <inheritdoc />
     public async Task<ApprovalDecision> RequestAsync(ApprovalRequest request, CancellationToken cancellationToken = default)
     {
@@ -39,6 +43,7 @@ public sealed class DefaultApprovalGate(
 
         var pending = new ApprovalDecision(request.ApprovalId, ApprovalOutcome.Pending, string.Empty, DateTimeOffset.UtcNow, null);
         this.decisions[request.ApprovalId] = pending;
+        this.expiries[request.ApprovalId] = request.Expiry;
 
         await this.emitter.EmitAsync(request, cancellationToken).ConfigureAwait(false);
         await this.audit.WriteAsync(
@@ -57,6 +62,20 @@ public sealed class DefaultApprovalGate(
     public Task<ApprovalDecision?> CheckStatusAsync(string approvalId, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(approvalId);
-        return Task.FromResult(this.decisions.TryGetValue(approvalId, out var decision) ? decision : null);
+        if (!this.decisions.TryGetValue(approvalId, out var decision))
+        {
+            return Task.FromResult<ApprovalDecision?>(null);
+        }
+
+        // A still-pending request whose expiry has passed is reported as Expired, so a caller
+        // polling the gate can never observe Pending indefinitely.
+        if (decision.Outcome == ApprovalOutcome.Pending
+            && this.expiries.TryGetValue(approvalId, out var expiry)
+            && DateTimeOffset.UtcNow > expiry)
+        {
+            decision = decision with { Outcome = ApprovalOutcome.Expired, Reason = "Approval request expired before a decision was recorded." };
+        }
+
+        return Task.FromResult<ApprovalDecision?>(decision);
     }
 }

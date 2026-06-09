@@ -41,6 +41,16 @@ public sealed class FixtureTests
         Assert.False(result.Allowed);
     }
 
+    /// <summary>The in-memory cost guard rejects negative amounts like the production guard.</summary>
+    [Fact]
+    public async Task CostGuard_rejects_negative_amounts()
+    {
+        var guard = new InMemoryCostGuard { DefaultLimit = 10m };
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => guard.CheckBudgetAsync("agent", "daily", -1m));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            guard.RecordAsync(new CostEvent("e1", "agent", "t", "daily", -1m, "usd", "model", DateTimeOffset.UtcNow, "corr")));
+    }
+
     /// <summary>The permissive policy and safety filter always allow.</summary>
     [Fact]
     public async Task Permissive_fixtures_allow()

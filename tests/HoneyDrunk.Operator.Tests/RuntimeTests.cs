@@ -131,6 +131,55 @@ public sealed class RuntimeTests
         await writer.WriteAsync("operator.test", "actor", AuditOutcome.Succeeded, AuditTarget.None);
     }
 
+    /// <summary>Negative cost is rejected on both the check and record paths so budgets cannot be bypassed.</summary>
+    [Fact]
+    public async Task CostGuard_rejects_negative_amounts()
+    {
+        var guard = new DefaultCostGuard(TestDoubles.ConfigProvider(), Options(), Telemetry(), Audit());
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => guard.CheckBudgetAsync("agent", "daily", -1m));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            guard.RecordAsync(new CostEvent("e1", "agent", "tenant", "daily", -1m, "usd", "model", DateTimeOffset.UtcNow, "corr")));
+    }
+
+    /// <summary>A pending approval whose expiry has passed is reported as Expired, never Pending forever.</summary>
+    [Fact]
+    public async Task ApprovalGate_reports_expired_after_expiry_passes()
+    {
+        var emitter = new ApprovalEventEmitter(Substitute.For<IApprovalEventSink>(), Telemetry());
+        var gate = new DefaultApprovalGate(emitter, Telemetry(), Audit());
+
+        var request = new ApprovalRequest("a1", "subject", "deploy", new Dictionary<string, string>(), "scope", DateTimeOffset.UtcNow.AddMinutes(-1), "corr");
+        await gate.RequestAsync(request);
+
+        var status = await gate.CheckStatusAsync("a1");
+        Assert.NotNull(status);
+        Assert.Equal(ApprovalOutcome.Expired, status!.Outcome);
+    }
+
+    /// <summary>HalfOpen admits only the configured trial budget, then denies until the probe is resolved.</summary>
+    [Fact]
+    public async Task CircuitBreaker_half_open_limits_trial_calls()
+    {
+        var config = TestDoubles.ConfigProvider(new Dictionary<string, string>
+        {
+            ["HoneyDrunk:Operator:Breaker:svc:ResetWindowSeconds"] = "0",
+            ["HoneyDrunk:Operator:Breaker:svc:HalfOpenTrialCount"] = "2",
+        });
+        var breaker = new DefaultCircuitBreaker(config, Options(), Telemetry(), Audit());
+
+        await breaker.TripAsync("svc", "failures");
+
+        // Reset window is 0s, so the first probe transitions to HalfOpen and admits two trials.
+        Assert.True(await breaker.IsAllowedAsync("svc"));
+        Assert.Equal(BreakerState.HalfOpen, await breaker.GetStateAsync("svc"));
+        Assert.True(await breaker.IsAllowedAsync("svc"));
+
+        // Trial budget exhausted: further calls are denied while still HalfOpen.
+        Assert.False(await breaker.IsAllowedAsync("svc"));
+        Assert.Equal(BreakerState.HalfOpen, await breaker.GetStateAsync("svc"));
+    }
+
     private static OperatorTelemetry Telemetry() => new(Substitute.For<ITelemetryActivityFactory>());
 
     private static OperatorAuditWriter Audit() => new(Array.Empty<IAuditLog>());

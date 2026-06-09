@@ -13,7 +13,11 @@ public sealed class OperatorOptions
     /// <summary>Gets or sets the configuration key prefix Operator reads settings under.</summary>
     public string ConfigKeyPrefix { get; set; } = "HoneyDrunk:Operator";
 
-    /// <summary>Gets or sets the fallback failure count that trips a breaker when config is absent.</summary>
+    /// <summary>
+    /// Gets or sets the fallback failure count intended to auto-trip a breaker. Reserved — not yet
+    /// enforced in v0.1.0: auto-trip requires a failure-reporting API on <c>ICircuitBreaker</c> that
+    /// is deferred to a follow-up packet. Until then breakers trip only via explicit <c>TripAsync</c>.
+    /// </summary>
     public int DefaultBreakerFailureThreshold { get; set; } = 5;
 
     /// <summary>Gets or sets the fallback half-open trial count when config is absent.</summary>

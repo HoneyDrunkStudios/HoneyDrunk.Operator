@@ -37,15 +37,35 @@ public sealed class DefaultCircuitBreaker(
         using var activity = this.telemetry.Start("circuit-breaker", "is-allowed");
         var entry = this.entries.GetOrAdd(breakerName, static _ => new BreakerEntry());
         var resetWindow = await this.ReadIntAsync($"Breaker:{breakerName}:ResetWindowSeconds", this.options.DefaultBreakerResetWindowSeconds, cancellationToken).ConfigureAwait(false);
+        var trialCount = await this.ReadIntAsync($"Breaker:{breakerName}:HalfOpenTrialCount", this.options.DefaultBreakerHalfOpenTrialCount, cancellationToken).ConfigureAwait(false);
 
         lock (entry.Gate)
         {
             if (entry.State == BreakerState.Open && DateTimeOffset.UtcNow - entry.OpenedAt >= TimeSpan.FromSeconds(resetWindow))
             {
+                // Reset window elapsed: admit a bounded number of trial calls to probe recovery.
                 entry.State = BreakerState.HalfOpen;
+                entry.HalfOpenTrialsRemaining = trialCount;
             }
 
-            return entry.State != BreakerState.Open;
+            if (entry.State == BreakerState.Open)
+            {
+                return false;
+            }
+
+            // While HalfOpen, allow only the configured trial budget; once exhausted, deny until a
+            // caller resolves the probe via ResetAsync (recovered) or TripAsync (still failing).
+            if (entry.State == BreakerState.HalfOpen)
+            {
+                if (entry.HalfOpenTrialsRemaining <= 0)
+                {
+                    return false;
+                }
+
+                entry.HalfOpenTrialsRemaining--;
+            }
+
+            return true;
         }
     }
 
@@ -111,5 +131,7 @@ public sealed class DefaultCircuitBreaker(
         public BreakerState State { get; set; } = BreakerState.Closed;
 
         public DateTimeOffset OpenedAt { get; set; }
+
+        public int HalfOpenTrialsRemaining { get; set; }
     }
 }
