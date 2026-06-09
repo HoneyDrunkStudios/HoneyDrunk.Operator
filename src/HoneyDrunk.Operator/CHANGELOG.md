@@ -25,6 +25,12 @@ All notable changes to this package are documented here. The format follows
 - Bounded half-open probing: `DefaultCircuitBreaker` admits only `HalfOpenTrialCount` trial calls in
   the `HalfOpen` state (config-sourced; fallback `OperatorOptions.DefaultBreakerHalfOpenTrialCount`),
   then denies until the probe is resolved via `ResetAsync` or `TripAsync`.
+- Config validation: negative configured budget limits and negative breaker reset-window / half-open
+  trial counts are rejected and fall back to defaults, so a bad or tampered config value can't
+  silently disable enforcement. `GetStatusAsync` clamps reported remaining budget to zero.
+- Telemetry consistency: `DefaultCostGuard.GetStatusAsync`, `DefaultCircuitBreaker.GetStateAsync`, and
+  `DefaultApprovalGate.CheckStatusAsync` now open telemetry activities like their sibling operations;
+  `CheckStatusAsync` also persists the Expired transition once instead of recomputing it per poll.
 
 ### Deferred
 

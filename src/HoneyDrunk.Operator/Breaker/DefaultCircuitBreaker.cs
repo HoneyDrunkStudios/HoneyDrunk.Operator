@@ -108,6 +108,7 @@ public sealed class DefaultCircuitBreaker(
     public Task<BreakerState> GetStateAsync(string breakerName, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(breakerName);
+        using var activity = this.telemetry.Start("circuit-breaker", "get-state");
         var entry = this.entries.GetOrAdd(breakerName, static _ => new BreakerEntry());
         lock (entry.Gate)
         {
@@ -121,7 +122,12 @@ public sealed class DefaultCircuitBreaker(
             $"{this.options.ConfigKeyPrefix}:{key}",
             fallback.ToString(CultureInfo.InvariantCulture),
             cancellationToken).ConfigureAwait(false);
-        return int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value) ? value : fallback;
+
+        // Negative windows/trial counts produce surprising breaker behavior (instant Open exit,
+        // negative trial budget), so treat them as invalid and fall back to the default.
+        return int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value) && value >= 0
+            ? value
+            : fallback;
     }
 
     private sealed class BreakerEntry

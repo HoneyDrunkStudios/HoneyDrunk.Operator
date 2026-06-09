@@ -142,6 +142,24 @@ public sealed class RuntimeTests
             guard.RecordAsync(new CostEvent("e1", "agent", "tenant", "daily", -1m, "usd", "model", DateTimeOffset.UtcNow, "corr")));
     }
 
+    /// <summary>A negative configured budget is rejected and falls back to the default, not treated as unlimited.</summary>
+    [Fact]
+    public async Task CostGuard_negative_configured_limit_falls_back_to_default()
+    {
+        var config = TestDoubles.ConfigProvider(new Dictionary<string, string>
+        {
+            ["HoneyDrunk:Operator:Budget:agent:daily"] = "-5",
+        });
+        var guard = new DefaultCostGuard(config, Options(new OperatorOptions { DefaultBudgetLimit = 10m }), Telemetry(), Audit());
+
+        // A negative config value must not read as "unlimited"; the default limit (10) still enforces.
+        var over = await guard.CheckBudgetAsync("agent", "daily", 12m);
+        Assert.False(over.Allowed);
+
+        var status = await guard.GetStatusAsync("agent", "daily");
+        Assert.Equal(10m, status.Limit);
+    }
+
     /// <summary>A pending approval whose expiry has passed is reported as Expired, never Pending forever.</summary>
     [Fact]
     public async Task ApprovalGate_reports_expired_after_expiry_passes()

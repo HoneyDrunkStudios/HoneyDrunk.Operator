@@ -93,9 +93,10 @@ public sealed class DefaultCostGuard(
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(scope);
         ArgumentException.ThrowIfNullOrWhiteSpace(window);
+        using var activity = this.telemetry.Start("cost-guard", "get-status");
         var limit = await this.ReadLimitAsync(scope, window, cancellationToken).ConfigureAwait(false);
         var current = this.spend.GetValueOrDefault(Key(scope, window));
-        return new CostStatus(current, limit, limit > 0m ? limit - current : decimal.MaxValue, window);
+        return new CostStatus(current, limit, limit > 0m ? Math.Max(0m, limit - current) : decimal.MaxValue, window);
     }
 
     private static string Key(string scope, string window) => $"{scope}::{window}";
@@ -106,6 +107,11 @@ public sealed class DefaultCostGuard(
             $"{this.options.ConfigKeyPrefix}:Budget:{scope}:{window}",
             this.options.DefaultBudgetLimit.ToString(CultureInfo.InvariantCulture),
             cancellationToken).ConfigureAwait(false);
-        return decimal.TryParse(raw, NumberStyles.Number, CultureInfo.InvariantCulture, out var value) ? value : this.options.DefaultBudgetLimit;
+
+        // A negative configured limit would read as "unlimited" (limit > 0 is false) and silently
+        // disable enforcement, so reject it and fall back to the configured default.
+        return decimal.TryParse(raw, NumberStyles.Number, CultureInfo.InvariantCulture, out var value) && value >= 0m
+            ? value
+            : this.options.DefaultBudgetLimit;
     }
 }

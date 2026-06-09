@@ -62,18 +62,22 @@ public sealed class DefaultApprovalGate(
     public Task<ApprovalDecision?> CheckStatusAsync(string approvalId, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(approvalId);
+        using var activity = this.telemetry.Start("approval-gate", "check-status");
         if (!this.decisions.TryGetValue(approvalId, out var decision))
         {
             return Task.FromResult<ApprovalDecision?>(null);
         }
 
         // A still-pending request whose expiry has passed is reported as Expired, so a caller
-        // polling the gate can never observe Pending indefinitely.
+        // polling the gate can never observe Pending indefinitely. Persist the transition once and
+        // drop the expiry entry so it isn't recomputed on every later poll.
         if (decision.Outcome == ApprovalOutcome.Pending
             && this.expiries.TryGetValue(approvalId, out var expiry)
             && DateTimeOffset.UtcNow > expiry)
         {
             decision = decision with { Outcome = ApprovalOutcome.Expired, Reason = "Approval request expired before a decision was recorded." };
+            this.decisions[approvalId] = decision;
+            this.expiries.TryRemove(approvalId, out _);
         }
 
         return Task.FromResult<ApprovalDecision?>(decision);
