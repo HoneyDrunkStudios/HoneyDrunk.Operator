@@ -7,8 +7,12 @@ namespace HoneyDrunk.Operator.Testing;
 /// In-memory <see cref="IApprovalGate"/> for tests. Records every received request for assertions and
 /// returns a configurable outcome (default <see cref="ApprovalOutcome.Approved"/>) immediately.
 /// </summary>
-public sealed class InMemoryApprovalGate : IApprovalGate
+/// <param name="timeProvider">
+/// Optional clock used to stamp decisions (Grid clock policy); defaults to <see cref="TimeProvider.System"/>.
+/// </param>
+public sealed class InMemoryApprovalGate(TimeProvider? timeProvider = null) : IApprovalGate
 {
+    private readonly TimeProvider timeProvider = timeProvider ?? TimeProvider.System;
     private readonly ConcurrentDictionary<string, ApprovalDecision> decisions = new(StringComparer.Ordinal);
     private readonly List<ApprovalRequest> received = [];
 
@@ -36,7 +40,7 @@ public sealed class InMemoryApprovalGate : IApprovalGate
             this.received.Add(request);
         }
 
-        var decision = new ApprovalDecision(request.ApprovalId, this.DefaultOutcome, "in-memory", DateTimeOffset.UtcNow, null);
+        var decision = new ApprovalDecision(request.ApprovalId, this.DefaultOutcome, "in-memory", this.timeProvider.GetUtcNow(), null);
         this.decisions[request.ApprovalId] = decision;
         return Task.FromResult(decision);
     }

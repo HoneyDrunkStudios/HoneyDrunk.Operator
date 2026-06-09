@@ -6,12 +6,16 @@ namespace HoneyDrunk.Operator.Testing.Tests;
 /// <summary>Smoke tests for the in-memory Operator fixtures.</summary>
 public sealed class FixtureTests
 {
+    // Fixed instant for fixture data; the exact value is irrelevant and a literal keeps these tests
+    // off the system clock (Grid clock policy).
+    private static readonly DateTimeOffset SampleInstant = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+
     /// <summary>The in-memory approval gate records requests and returns the configured outcome.</summary>
     [Fact]
     public async Task ApprovalGate_records_and_returns_configured_outcome()
     {
         var gate = new InMemoryApprovalGate { DefaultOutcome = ApprovalOutcome.Denied };
-        var request = new ApprovalRequest("a1", "s", "act", new Dictionary<string, string>(), "scope", DateTimeOffset.UtcNow, "corr");
+        var request = new ApprovalRequest("a1", "s", "act", new Dictionary<string, string>(), "scope", SampleInstant, "corr");
 
         var decision = await gate.RequestAsync(request);
         Assert.Equal(ApprovalOutcome.Denied, decision.Outcome);
@@ -36,7 +40,7 @@ public sealed class FixtureTests
     public async Task CostGuard_enforces_supplied_budget()
     {
         var guard = new InMemoryCostGuard { DefaultLimit = 10m };
-        await guard.RecordAsync(new CostEvent("e1", "agent", "t", "daily", 8m, "usd", "model", DateTimeOffset.UtcNow, "corr"));
+        await guard.RecordAsync(new CostEvent("e1", "agent", "t", "daily", 8m, "usd", "model", SampleInstant, "corr"));
         var result = await guard.CheckBudgetAsync("agent", "daily", 5m);
         Assert.False(result.Allowed);
     }
@@ -48,7 +52,7 @@ public sealed class FixtureTests
         var guard = new InMemoryCostGuard { DefaultLimit = 10m };
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => guard.CheckBudgetAsync("agent", "daily", -1m));
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
-            guard.RecordAsync(new CostEvent("e1", "agent", "t", "daily", -1m, "usd", "model", DateTimeOffset.UtcNow, "corr")));
+            guard.RecordAsync(new CostEvent("e1", "agent", "t", "daily", -1m, "usd", "model", SampleInstant, "corr")));
     }
 
     /// <summary>Reported remaining budget never goes negative once spend exceeds the limit, matching production.</summary>
@@ -56,7 +60,7 @@ public sealed class FixtureTests
     public async Task CostGuard_status_remaining_is_clamped_to_zero()
     {
         var guard = new InMemoryCostGuard { DefaultLimit = 10m };
-        await guard.RecordAsync(new CostEvent("e1", "agent", "t", "daily", 12m, "usd", "model", DateTimeOffset.UtcNow, "corr"));
+        await guard.RecordAsync(new CostEvent("e1", "agent", "t", "daily", 12m, "usd", "model", SampleInstant, "corr"));
 
         var status = await guard.GetStatusAsync("agent", "daily");
         Assert.Equal(12m, status.Spent);

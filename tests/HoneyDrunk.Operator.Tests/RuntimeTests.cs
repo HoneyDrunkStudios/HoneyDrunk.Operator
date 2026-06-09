@@ -54,7 +54,7 @@ public sealed class RuntimeTests
         var first = await guard.CheckBudgetAsync("agent", "daily", 6m);
         Assert.True(first.Allowed);
 
-        await guard.RecordAsync(new CostEvent("e1", "agent", "tenant", "daily", 6m, "usd", "model", DateTimeOffset.UtcNow, "corr"));
+        await guard.RecordAsync(new CostEvent("e1", "agent", "tenant", "daily", 6m, "usd", "model", Clock().GetUtcNow(), "corr"));
         var status = await guard.GetStatusAsync("agent", "daily");
         Assert.Equal(6m, status.Spent);
 
@@ -140,7 +140,7 @@ public sealed class RuntimeTests
 
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => guard.CheckBudgetAsync("agent", "daily", -1m));
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
-            guard.RecordAsync(new CostEvent("e1", "agent", "tenant", "daily", -1m, "usd", "model", DateTimeOffset.UtcNow, "corr")));
+            guard.RecordAsync(new CostEvent("e1", "agent", "tenant", "daily", -1m, "usd", "model", Clock().GetUtcNow(), "corr")));
     }
 
     /// <summary>A negative configured budget is rejected and falls back to the default, not treated as unlimited.</summary>
