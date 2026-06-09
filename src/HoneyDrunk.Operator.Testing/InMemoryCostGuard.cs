@@ -9,7 +9,7 @@ namespace HoneyDrunk.Operator.Testing;
 /// </summary>
 public sealed class InMemoryCostGuard : ICostGuard
 {
-    private readonly ConcurrentDictionary<string, decimal> spend = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<(string Scope, string Window), decimal> spend = new();
 
     /// <summary>Gets or sets the per-scope budget applied to every window (<c>0</c> means unlimited).</summary>
     public decimal DefaultLimit { get; set; }
@@ -22,7 +22,7 @@ public sealed class InMemoryCostGuard : ICostGuard
 
         // Mirror production semantics: cost is non-negative so a fixture can't slip under budget.
         ArgumentOutOfRangeException.ThrowIfNegative(amount);
-        var current = this.spend.GetValueOrDefault(Key(scope, window));
+        var current = this.spend.GetValueOrDefault((scope, window));
         var projected = current + amount;
         if (this.DefaultLimit > 0m && projected > this.DefaultLimit)
         {
@@ -37,7 +37,7 @@ public sealed class InMemoryCostGuard : ICostGuard
     {
         ArgumentNullException.ThrowIfNull(costEvent);
         ArgumentOutOfRangeException.ThrowIfNegative(costEvent.Amount);
-        this.spend.AddOrUpdate(Key(costEvent.AgentId, costEvent.Window), costEvent.Amount, (_, existing) => existing + costEvent.Amount);
+        this.spend.AddOrUpdate((costEvent.AgentId, costEvent.Window), costEvent.Amount, (_, existing) => existing + costEvent.Amount);
         return Task.CompletedTask;
     }
 
@@ -46,9 +46,7 @@ public sealed class InMemoryCostGuard : ICostGuard
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(scope);
         ArgumentException.ThrowIfNullOrWhiteSpace(window);
-        var current = this.spend.GetValueOrDefault(Key(scope, window));
+        var current = this.spend.GetValueOrDefault((scope, window));
         return Task.FromResult(new CostStatus(current, this.DefaultLimit, this.DefaultLimit > 0m ? this.DefaultLimit - current : decimal.MaxValue, window));
     }
-
-    private static string Key(string scope, string window) => $"{scope}::{window}";
 }

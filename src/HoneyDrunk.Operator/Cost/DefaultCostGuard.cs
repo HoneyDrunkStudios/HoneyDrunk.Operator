@@ -16,7 +16,10 @@ namespace HoneyDrunk.Operator.Cost;
 /// <remarks>
 /// Durable persistence of the accumulator (via HoneyDrunk.Data's repository surface per ADR-0018
 /// D12) is deferred to a follow-up packet; v0.1.0 accumulates in process. Budget-exceeded denials
-/// and recorded spend are emitted to the audit substrate.
+/// and recorded spend are emitted to the audit substrate. Check-then-record is intentionally split
+/// across <see cref="CheckBudgetAsync"/> and <see cref="RecordAsync"/> per the contract and is not
+/// atomic under concurrent callers in v0.1.0; hard enforcement under contention lands with the
+/// durable (transactional) backing.
 /// </remarks>
 /// <param name="config">The Vault configuration provider.</param>
 /// <param name="options">Startup fallback options.</param>
@@ -35,7 +38,8 @@ public sealed class DefaultCostGuard(
 
     // TODO(data): back the accumulator with HoneyDrunk.Data's IRepository / IUnitOfWork for
     // durability across process restarts per ADR-0018 D12. Tracked as a follow-up packet.
-    private readonly ConcurrentDictionary<string, decimal> spend = new(StringComparer.Ordinal);
+    // Keyed by the (scope, window) tuple so delimiter-bearing scopes/windows can't collide.
+    private readonly ConcurrentDictionary<(string Scope, string Window), decimal> spend = new();
 
     /// <inheritdoc />
     public async Task<CostCheckResult> CheckBudgetAsync(string scope, string window, decimal amount, CancellationToken cancellationToken = default)
@@ -49,7 +53,7 @@ public sealed class DefaultCostGuard(
         using var activity = this.telemetry.Start("cost-guard", "check-budget");
 
         var limit = await this.ReadLimitAsync(scope, window, cancellationToken).ConfigureAwait(false);
-        var current = this.spend.GetValueOrDefault(Key(scope, window));
+        var current = this.spend.GetValueOrDefault((scope, window));
         var projected = current + amount;
 
         if (limit > 0m && projected > limit)
@@ -76,7 +80,7 @@ public sealed class DefaultCostGuard(
         // and let a scope drift back under budget.
         ArgumentOutOfRangeException.ThrowIfNegative(costEvent.Amount);
         using var activity = this.telemetry.Start("cost-guard", "record");
-        this.spend.AddOrUpdate(Key(costEvent.AgentId, costEvent.Window), costEvent.Amount, (_, existing) => existing + costEvent.Amount);
+        this.spend.AddOrUpdate((costEvent.AgentId, costEvent.Window), costEvent.Amount, (_, existing) => existing + costEvent.Amount);
 
         await this.audit.WriteAsync(
             "operator.cost-guard.recorded",
@@ -95,11 +99,9 @@ public sealed class DefaultCostGuard(
         ArgumentException.ThrowIfNullOrWhiteSpace(window);
         using var activity = this.telemetry.Start("cost-guard", "get-status");
         var limit = await this.ReadLimitAsync(scope, window, cancellationToken).ConfigureAwait(false);
-        var current = this.spend.GetValueOrDefault(Key(scope, window));
+        var current = this.spend.GetValueOrDefault((scope, window));
         return new CostStatus(current, limit, limit > 0m ? Math.Max(0m, limit - current) : decimal.MaxValue, window);
     }
-
-    private static string Key(string scope, string window) => $"{scope}::{window}";
 
     private async Task<decimal> ReadLimitAsync(string scope, string window, CancellationToken cancellationToken)
     {
