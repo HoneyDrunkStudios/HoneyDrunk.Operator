@@ -1,8 +1,34 @@
 # Changelog — HoneyDrunk.Operator
 
+## [0.1.1] - 2026-09-26
+
+### Changed
+
+- Refresh stable NuGet dependencies; preserve target frameworks and HoneyDrunk public contracts.
+
+| Dependency | Previous | Updated |
+| --- | --- | --- |
+| Microsoft.Extensions.DependencyInjection.Abstractions | 10.0.8 | 10.0.12 |
+| Microsoft.Extensions.Hosting.Abstractions | 10.0.8 | 10.0.12 |
+| Microsoft.Extensions.Logging.Abstractions | 10.0.8 | 10.0.12 |
+| Microsoft.Extensions.Options | 10.0.8 | 10.0.12 |
+| NSubstitute | 5.3.0 | 6.2.0 |
+
+
 All notable changes to this repository are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+
+
+
+### Verified HoneyDrunk dependencies
+
+- HoneyDrunk.Audit.Abstractions: 0.1.0 -> 0.2.1 (verified on NuGet.org).
+- HoneyDrunk.Kernel.Abstractions: 0.8.0 -> 0.8.1 (verified on NuGet.org).
+- HoneyDrunk.Standards: 0.2.9 -> 0.3.0 (verified on NuGet.org).
+- HoneyDrunk.Standards.Tests: 0.2.9 -> 0.3.0 (verified on NuGet.org).
+- HoneyDrunk.Vault: 0.5.0 -> 0.8.1 (verified on NuGet.org).
 
 ## [0.1.0] - 2026-06-09
 
