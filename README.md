@@ -56,4 +56,4 @@ the Audit Node (`IAuditLog`). See the runtime package README for host responsibi
 
 ## Standup
 
-Governed by [ADR-0018](https://github.com/HoneyDrunkStudios/HoneyDrunk.Architecture/blob/main/adrs/ADR-0018-stand-up-honeydrunk-operator-node.md).
+Governed by [ADR-0018](https://github.com/HoneyDrunkStudios/HoneyDrunk.Studio/blob/main/adrs/ADR-0018-stand-up-honeydrunk-operator-node.md).
