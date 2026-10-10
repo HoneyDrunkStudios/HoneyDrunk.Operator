@@ -19,3 +19,11 @@ dotnet test HoneyDrunk.Operator.slnx -c Release --no-build
 ```
 
 Use the checked-in workflow and relevant test documentation for additional integration prerequisites, coverage and consumer checks. Do not use live resources or credentials merely to make a local check pass.
+
+## Code Review Rules
+
+Apply the [shared review criteria](https://github.com/HoneyDrunkStudios/HoneyDrunk.Standards/blob/main/HoneyDrunk.Standards/docs/CONVENTIONS.md#code-review) to changed behavior, using the repository boundaries above. Report actionable findings with the failing path, concrete impact and a small corrective action; disclose unavailable evidence. These rules grant no cross-repository access or merge authority.
+
+- Preserve human-policy approvals, circuit breakers, cost guards and safety filters as explicit reusable primitives. Do not move reasoning, drift detection or PR automation here; use existing policy contracts rather than inventing orchestration.
+- Trace deny/expiry/override decisions through concurrency, dependency failure and retry. Flag fail-open defaults, approval reuse outside its scope or retry that defeats a closed budget/circuit; keep decision evidence attributable without exposing secrets.
+- Require allow/deny, expired/duplicate approval and failure-boundary tests for changed policy. A test or review cannot grant approval; distinguish actual implemented guards from planned integrations and leave deterministic checks to CI.
