@@ -1,5 +1,11 @@
 # Changelog — HoneyDrunk.Operator
 
+## [Unreleased]
+
+### Changed
+
+- Update HoneyDrunk.Standards and HoneyDrunk.Standards.Tests to 0.4.1 to consume the architecture analyzer and TODO issue-link fixes.
+
 ## [0.1.1] - 2026-09-26
 
 ### Changed
