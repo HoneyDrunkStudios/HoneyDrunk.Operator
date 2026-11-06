@@ -7,14 +7,14 @@
     <ProjectReference Include="..\HoneyDrunk.Operator.Abstractions\HoneyDrunk.Operator.Abstractions.csproj" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="HoneyDrunk.Standards" Version="0.3.0" PrivateAssets="all" />
-    <PackageReference Include="HoneyDrunk.Kernel.Abstractions" Version="0.8.1" />
-    <PackageReference Include="HoneyDrunk.Vault" Version="0.8.1" />
-    <PackageReference Include="HoneyDrunk.Audit.Abstractions" Version="0.2.1" />
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.12" />
-    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.12" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.12" />
-    <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.12" />
+    <PackageReference Include="HoneyDrunk.Standards" Version="0.4.3" PrivateAssets="all" />
+    <PackageReference Include="HoneyDrunk.Kernel.Abstractions" Version="0.8.2" />
+    <PackageReference Include="HoneyDrunk.Vault" Version="0.8.2" />
+    <PackageReference Include="HoneyDrunk.Audit.Abstractions" Version="0.2.2" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.14" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.14" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.14" />
+    <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.14" />
   </ItemGroup>
   <ItemGroup>
     <None Include="README.md" Pack="true" PackagePath="\" />
