@@ -23,6 +23,53 @@ public sealed class FixtureTests
         Assert.Equal(decision.Outcome, (await gate.CheckStatusAsync("a1"))!.Outcome);
     }
 
+    /// <summary>Deciding an approval changes the status the gate reports.</summary>
+    /// <returns>A task.</returns>
+    [Fact]
+    public async Task InMemoryApprovalGate_decide_changes_status()
+    {
+        var gate = new InMemoryApprovalGate { DefaultOutcome = ApprovalOutcome.Pending };
+        await gate.RequestAsync(new ApprovalRequest("a1", "s", "act", new Dictionary<string, string>(), "scope", SampleInstant, "corr"));
+
+        gate.Decide("a1", ApprovalOutcome.Denied);
+
+        Assert.Equal(ApprovalOutcome.Denied, (await gate.CheckStatusAsync("a1"))!.Outcome);
+    }
+
+    /// <summary>The in-memory desk lists what the gate holds as pending and records decisions on it.</summary>
+    /// <returns>A task.</returns>
+    [Fact]
+    public async Task ApprovalDesk_lists_pending_and_decides()
+    {
+        var gate = new InMemoryApprovalGate { DefaultOutcome = ApprovalOutcome.Pending };
+        var desk = new InMemoryApprovalDesk(gate);
+        await gate.RequestAsync(new ApprovalRequest("a1", "s", "act", new Dictionary<string, string>(), "scope", SampleInstant, "corr"));
+
+        Assert.Equal("a1", Assert.Single(await desk.ListPendingAsync()).Request.ApprovalId);
+        var decision = await desk.DecideAsync("a1", ApprovalOutcome.Approved, "founder", "fine");
+
+        Assert.Equal(ApprovalOutcome.Approved, decision!.Outcome);
+        Assert.Equal("founder", decision.ApproverIdentity);
+        Assert.Empty(await desk.ListPendingAsync());
+        Assert.Null(await desk.DecideAsync("unknown", ApprovalOutcome.Approved, "founder", "fine"));
+    }
+
+    /// <summary>The in-memory pauses record who paused and lift on resume.</summary>
+    /// <returns>A task.</returns>
+    [Fact]
+    public async Task AgentPauses_pause_and_resume()
+    {
+        var pauses = new InMemoryAgentPauses();
+
+        var state = await pauses.PauseAsync("agent:a", "founder", "checking");
+
+        Assert.Equal("founder", state.PausedBy);
+        Assert.Equal(state, await pauses.GetAsync("agent:a"));
+        Assert.True(await pauses.ResumeAsync("agent:a", "founder", "done"));
+        Assert.Null(await pauses.GetAsync("agent:a"));
+        Assert.False(await pauses.ResumeAsync("agent:a", "founder", "again"));
+    }
+
     /// <summary>The in-memory breaker honors trip and reset.</summary>
     [Fact]
     public async Task CircuitBreaker_honors_trip_and_reset()

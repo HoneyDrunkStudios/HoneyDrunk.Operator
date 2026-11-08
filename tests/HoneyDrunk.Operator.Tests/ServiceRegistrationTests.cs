@@ -23,6 +23,17 @@ public sealed class ServiceRegistrationTests
         Assert.NotNull(provider.GetService<ISafetyFilter>());
     }
 
+    /// <summary>The desk, the pauses and the in-memory store resolve, and the whole graph validates on build.</summary>
+    [Fact]
+    public void Registers_desk_pauses_and_inmemory_store()
+    {
+        using var provider = BuildProvider();
+
+        Assert.IsType<Approval.DefaultApprovalDesk>(provider.GetRequiredService<IApprovalDesk>());
+        Assert.IsType<Pauses.DefaultAgentPauses>(provider.GetRequiredService<IAgentPauses>());
+        Assert.IsType<State.InMemoryOperatorStore>(provider.GetRequiredService<State.IOperatorStore>());
+    }
+
     /// <summary>The telemetry and audit helpers resolve, and audit degrades to disabled with no sink.</summary>
     [Fact]
     public void Helpers_resolve_and_audit_degrades_gracefully()
@@ -38,6 +49,6 @@ public sealed class ServiceRegistrationTests
         services.AddSingleton(TestDoubles.ConfigProvider());
         services.AddSingleton(Substitute.For<ITelemetryActivityFactory>());
         services.AddHoneyDrunkOperator();
-        return services.BuildServiceProvider();
+        return services.BuildServiceProvider(new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });
     }
 }

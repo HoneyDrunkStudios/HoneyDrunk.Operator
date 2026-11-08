@@ -13,9 +13,14 @@ Downstream Nodes compile against this package only (invariant 116). Runtime comp
 | `ICostGuard` | interface | Enforce per-scope cost limits over a rolling window. |
 | `IDecisionPolicy` | interface | Allow / deny / require-approval evaluation of an action. |
 | `ISafetyFilter` | interface | Validate content against a safety rule set. |
+| `IApprovalDesk` | interface | List pending approvals and record a person's approve or deny (0.2.0). |
+| `IAgentPauses` | interface | Pause a named breaker until a person resumes it (0.2.0). |
 | `ApprovalRequest` | record | A request for human approval. |
 | `ApprovalDecision` | record | The decision recorded against an approval request. |
 | `CostEvent` | record | A single recorded unit of attributable spend. |
+| `PauseState` | record | Who paused a breaker, why, and since when (0.2.0). |
+| `PendingApproval` | record | A pending request and when it was recorded (0.2.0). |
+| `CostWindows` | static class | Budget window keys; `Month` is the UTC calendar month (0.2.0). |
 
 ## Audit relocation (ADR-0030 / ADR-0031)
 

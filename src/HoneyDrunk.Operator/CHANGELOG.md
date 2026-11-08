@@ -4,6 +4,20 @@ All notable changes to this package are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-11-08
+
+### Added
+
+- `DefaultApprovalDesk` records a person's approve or deny once, by compare-and-set, and lists pending requests.
+- `DefaultAgentPauses` pauses and resumes named breakers; pauses override every breaker state.
+- The cost guard pauses an agent once when its monthly spend reaches its budget.
+- `IOperatorStore` and the in-memory default; audit entries for decisions, pauses, resumes and budget stops.
+
+### Changed
+
+- `DefaultApprovalGate`, `DefaultCircuitBreaker` and `DefaultCostGuard` take the store and pauses in their constructors.
+- An approval id reused for a different request is refused instead of returning the earlier decision.
+
 ## [0.1.2] - 2026-11-05
 
 ### Changed

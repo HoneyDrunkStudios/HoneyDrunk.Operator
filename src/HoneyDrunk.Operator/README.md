@@ -42,6 +42,6 @@ Plus `OperatorTelemetry` (Kernel `ITelemetryActivityFactory`), `OperatorAuditWri
   `HoneyDrunk.Vault.Abstractions`) is consumed from the `HoneyDrunk.Vault` package — the contract
   type only; no Vault runtime services are composed here.
 - **v0.1.0 deferrals:** the `AuthBackedDecisionPolicy` → HoneyDrunk.Auth delegation (ADR-0018 D5) and
-  durable persistence of cost/approval state (HoneyDrunk.Data, ADR-0018 D12) are marked with
-  `TODO(auth)` / `TODO(data)` and land in follow-up packets. The v0.1.0 defaults are config-sourced
-  and in-process so the substrate is composable and testable from the first release.
+  durable persistence of cost/approval state (HoneyDrunk.Data, ADR-0018 D12) were deferred from v0.1.0.
+  Since 0.2.0, state lives behind `IOperatorStore`: in memory by default, or durable with
+  `HoneyDrunk.Operator.Data`. The Auth delegation is still marked `TODO(auth)`.

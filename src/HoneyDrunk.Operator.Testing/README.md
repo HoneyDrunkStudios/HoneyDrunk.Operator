@@ -9,7 +9,9 @@ development. References **only** `HoneyDrunk.Operator.Abstractions` (invariant 3
 
 | Fixture | Contract | Default behavior |
 |---|---|---|
-| `InMemoryApprovalGate` | `IApprovalGate` | Records requests; returns `Approved`. |
+| `InMemoryApprovalGate` | `IApprovalGate` | Records requests; returns `Approved`. `Decide(id, outcome)` changes a decision. |
+| `InMemoryApprovalDesk` | `IApprovalDesk` | Lists the gate's pending requests and decides them through `Decide`. |
+| `InMemoryAgentPauses` | `IAgentPauses` | Pauses until resumed; pausing again keeps the first pause. |
 | `InMemoryCircuitBreaker` | `ICircuitBreaker` | Closed; honors trip/reset. |
 | `InMemoryCostGuard` | `ICostGuard` | Accumulates spend against `DefaultLimit`. |
 | `PermissiveDecisionPolicy` | `IDecisionPolicy` | Always `Allow`. |
