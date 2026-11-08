@@ -10,12 +10,15 @@ All notable changes to this package are documented here. The format follows
 
 - `DefaultApprovalDesk` records a person's approve or deny once, by compare-and-set, and lists pending requests.
 - `DefaultAgentPauses` pauses and resumes named breakers; pauses override every breaker state.
-- The cost guard pauses an agent once when its monthly spend reaches its budget.
+- The cost guard pauses an agent once when its monthly spend reaches its budget, never replacing a pause already in place. The stop runs before anything else once the spend is stored and ignores the caller's cancellation.
+- A scope's standing budget, `Budget:{scope}`, applies to every window that has no `Budget:{scope}:{window}` of its own.
+- A pending approval asked for again is announced again, so a failed announcement is not final.
 - `IOperatorStore` and the in-memory default; audit entries for decisions, pauses, resumes and budget stops.
 
 ### Changed
 
-- `DefaultApprovalGate`, `DefaultCircuitBreaker` and `DefaultCostGuard` take the store and pauses in their constructors.
+- Constructors: `DefaultApprovalGate` takes `IOperatorStore`; `DefaultCircuitBreaker` takes `IAgentPauses`; `DefaultCostGuard` takes `IOperatorStore` and `TimeProvider`.
+- `DefaultCostGuard.RecordAsync` refuses an agent id longer than 194 characters, so its pause name fits.
 - An approval id reused for a different request is refused instead of returning the earlier decision.
 
 ## [0.1.2] - 2026-11-05

@@ -51,7 +51,7 @@ public sealed class RuntimeTests
         {
             ["HoneyDrunk:Operator:Budget:agent:daily"] = "10",
         });
-        var guard = new DefaultCostGuard(config, Options(), Telemetry(), Audit(), new InMemoryOperatorStore(), NoPauses());
+        var guard = new DefaultCostGuard(config, Options(), Telemetry(), Audit(), new InMemoryOperatorStore(), TimeProvider.System);
 
         var first = await guard.CheckBudgetAsync("agent", "daily", 6m);
         Assert.True(first.Allowed);
@@ -138,7 +138,7 @@ public sealed class RuntimeTests
     [Fact]
     public async Task CostGuard_rejects_negative_amounts()
     {
-        var guard = new DefaultCostGuard(TestDoubles.ConfigProvider(), Options(), Telemetry(), Audit(), new InMemoryOperatorStore(), NoPauses());
+        var guard = new DefaultCostGuard(TestDoubles.ConfigProvider(), Options(), Telemetry(), Audit(), new InMemoryOperatorStore(), TimeProvider.System);
 
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => guard.CheckBudgetAsync("agent", "daily", -1m));
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
@@ -153,7 +153,7 @@ public sealed class RuntimeTests
         {
             ["HoneyDrunk:Operator:Budget:agent:daily"] = "-5",
         });
-        var guard = new DefaultCostGuard(config, Options(new OperatorOptions { DefaultBudgetLimit = 10m }), Telemetry(), Audit(), new InMemoryOperatorStore(), NoPauses());
+        var guard = new DefaultCostGuard(config, Options(new OperatorOptions { DefaultBudgetLimit = 10m }), Telemetry(), Audit(), new InMemoryOperatorStore(), TimeProvider.System);
 
         // A negative config value must not read as "unlimited"; the default limit (10) still enforces.
         var over = await guard.CheckBudgetAsync("agent", "daily", 12m);

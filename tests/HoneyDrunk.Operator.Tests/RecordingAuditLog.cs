@@ -18,10 +18,20 @@ internal sealed class RecordingAuditLog : IAuditLog
         }
     }
 
+    public string? ThrowOn { get; set; }
+
+    public List<(string eventName, bool canBeCanceled)> Tokens { get; } = [];
+
     public Task AppendAsync(AuditEntry entry, CancellationToken cancellationToken = default)
     {
         lock (this.entries)
         {
+            this.Tokens.Add((eventName: entry.EventName, canBeCanceled: cancellationToken.CanBeCanceled));
+            if (entry.EventName == this.ThrowOn)
+            {
+                throw new InvalidOperationException("audit sink failed");
+            }
+
             this.entries.Add(entry);
         }
 

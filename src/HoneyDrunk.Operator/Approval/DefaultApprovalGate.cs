@@ -48,10 +48,17 @@ public sealed class DefaultApprovalGate(
                 throw new InvalidOperationException($"Approval id '{request.ApprovalId}' is already used for a different request.");
             }
 
-            return (await this.CheckStatusAsync(request.ApprovalId, cancellationToken).ConfigureAwait(false))!;
+            var current = (await this.CheckStatusAsync(request.ApprovalId, cancellationToken).ConfigureAwait(false))!;
+            if (current.Outcome == ApprovalOutcome.Pending)
+            {
+                // Announce again while still pending, so an announcement that failed or was cancelled is not final.
+                await this.emitter.EmitAsync(request, cancellationToken).ConfigureAwait(false);
+            }
+
+            return current;
         }
 
-        await this.emitter.EmitAsync(request, cancellationToken).ConfigureAwait(false);
+        // The request is stored; its audit entry must not be lost to the caller's cancellation.
         await this.audit.WriteAsync(
             "operator.approval-gate.requested",
             request.Subject,
@@ -59,7 +66,8 @@ public sealed class DefaultApprovalGate(
             new AuditTarget("approval", request.ApprovalId),
             request.Action,
             request.RequesterCorrelationId,
-            cancellationToken).ConfigureAwait(false);
+            CancellationToken.None).ConfigureAwait(false);
+        await this.emitter.EmitAsync(request, cancellationToken).ConfigureAwait(false);
         return pending;
     }
 

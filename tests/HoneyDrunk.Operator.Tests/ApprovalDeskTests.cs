@@ -1,4 +1,5 @@
 using HoneyDrunk.Operator.Abstractions;
+using NSubstitute;
 using Xunit;
 
 namespace HoneyDrunk.Operator.Tests;
@@ -221,6 +222,53 @@ public sealed class ApprovalDeskTests
 
         Assert.Equal(context.Keys.Order(StringComparer.Ordinal), pending.Request.Context.Keys.Order(StringComparer.Ordinal));
         Assert.Equal("tool-abc", pending.Request.Context["requestKey"]);
+    }
+
+    /// <summary>A pending request asked for again is announced again, so a failed announcement is not final.</summary>
+    /// <returns>A task.</returns>
+    [Fact]
+    public async Task Pending_rerequest_announces_again_after_a_failed_announcement()
+    {
+        var fixture = new OperatorFixture();
+        fixture.Sink.EmitApprovalNeededAsync(Arg.Any<ApprovalRequest>(), Arg.Any<CancellationToken>())
+            .Returns(_ => Task.FromException(new OperationCanceledException()), _ => Task.CompletedTask);
+        await Assert.ThrowsAsync<OperationCanceledException>(() => fixture.Gate.RequestAsync(fixture.Request()));
+
+        var again = await fixture.Gate.RequestAsync(fixture.Request());
+
+        Assert.Equal(ApprovalOutcome.Pending, again.Outcome);
+        await fixture.Sink.Received(2).EmitApprovalNeededAsync(Arg.Any<ApprovalRequest>(), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>A decided request asked for again is not announced again.</summary>
+    /// <returns>A task.</returns>
+    [Fact]
+    public async Task Decided_rerequest_is_not_announced_again()
+    {
+        var fixture = new OperatorFixture();
+        await fixture.Gate.RequestAsync(fixture.Request());
+        await fixture.Desk.DecideAsync("a1", ApprovalOutcome.Approved, "founder", "fine");
+
+        await fixture.Gate.RequestAsync(fixture.Request());
+
+        await fixture.Sink.Received(1).EmitApprovalNeededAsync(Arg.Any<ApprovalRequest>(), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>Once a request or decision is stored, its audit entry does not depend on the caller's token.</summary>
+    /// <returns>A task.</returns>
+    [Fact]
+    public async Task Audit_after_a_stored_change_does_not_use_the_callers_token()
+    {
+        var fixture = new OperatorFixture();
+        using var cancellation = new CancellationTokenSource();
+
+        await fixture.Gate.RequestAsync(fixture.Request(), cancellation.Token);
+        await fixture.Desk.DecideAsync("a1", ApprovalOutcome.Approved, "founder", "fine", cancellation.Token);
+        await fixture.Pauses.PauseAsync("agent:a", "founder", "checking", cancellation.Token);
+        await fixture.Pauses.ResumeAsync("agent:a", "founder", "done", cancellation.Token);
+
+        Assert.Equal(4, fixture.AuditLog.Tokens.Count);
+        Assert.All(fixture.AuditLog.Tokens, token => Assert.False(token.canBeCanceled, token.eventName));
     }
 
     private static async Task<bool> Attempt(Func<Task<ApprovalDecision?>> decide)

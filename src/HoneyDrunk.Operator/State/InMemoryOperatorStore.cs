@@ -67,6 +67,13 @@ public sealed class InMemoryOperatorStore : IOperatorStore
     }
 
     /// <inheritdoc />
+    public Task<bool> TryAddPauseAsync(PauseState pause, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(pause);
+        return Task.FromResult(this.pauses.TryAdd(pause.Name, pause));
+    }
+
+    /// <inheritdoc />
     public Task<bool> RemovePauseAsync(string name, CancellationToken cancellationToken) =>
         Task.FromResult(this.pauses.TryRemove(name, out _));
 

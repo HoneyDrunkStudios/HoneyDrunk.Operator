@@ -72,6 +72,19 @@ public abstract class OperatorStoreContract
         Assert.Equal(context.OrderBy(pair => pair.Key, StringComparer.Ordinal), stored!.Request.Context.OrderBy(pair => pair.Key, StringComparer.Ordinal));
     }
 
+    /// <summary>Adding a pause inserts only when none exists, and never replaces one.</summary>
+    /// <returns>A task.</returns>
+    [Fact]
+    public async Task TryAddPause_inserts_only_when_absent()
+    {
+        var store = this.CreateStore();
+
+        Assert.True(await store.TryAddPauseAsync(new PauseState("agent:a", "operator:budget", "monthly budget reached", Now), CancellationToken.None));
+        Assert.False(await store.TryAddPauseAsync(new PauseState("agent:a", "someone", "other", Now), CancellationToken.None));
+
+        Assert.Equal("operator:budget", (await store.GetPauseAsync("agent:a", CancellationToken.None))!.PausedBy);
+    }
+
     /// <summary>Pauses are set, read and removed.</summary>
     /// <returns>A task.</returns>
     [Fact]

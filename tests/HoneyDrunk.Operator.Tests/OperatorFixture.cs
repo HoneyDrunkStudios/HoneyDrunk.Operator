@@ -22,16 +22,18 @@ internal sealed class OperatorFixture
         var audit = new OperatorAuditWriter([this.AuditLog]);
         var options = Microsoft.Extensions.Options.Options.Create(new OperatorOptions());
         var configProvider = TestDoubles.ConfigProvider(config);
-        this.Gate = new DefaultApprovalGate(new ApprovalEventEmitter(Substitute.For<IApprovalEventSink>(), telemetry), telemetry, audit, this.Clock, this.Store);
+        this.Gate = new DefaultApprovalGate(new ApprovalEventEmitter(this.Sink, telemetry), telemetry, audit, this.Clock, this.Store);
         this.Desk = new DefaultApprovalDesk(this.Store, audit, telemetry, this.Clock);
         this.Pauses = new DefaultAgentPauses(this.Store, audit, telemetry, this.Clock);
         this.Breaker = new DefaultCircuitBreaker(configProvider, options, telemetry, audit, this.Clock, this.Pauses);
-        this.CostGuard = new DefaultCostGuard(configProvider, options, telemetry, audit, this.Store, this.Pauses);
+        this.CostGuard = new DefaultCostGuard(configProvider, options, telemetry, audit, this.Store, this.Clock);
     }
 
     public MutableTimeProvider Clock { get; } = new(new DateTimeOffset(2026, 11, 8, 12, 0, 0, TimeSpan.Zero));
 
     public RecordingAuditLog AuditLog { get; } = new();
+
+    public IApprovalEventSink Sink { get; } = Substitute.For<IApprovalEventSink>();
 
     public IOperatorStore Store { get; }
 

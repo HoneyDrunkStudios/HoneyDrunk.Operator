@@ -70,6 +70,21 @@ public sealed class FixtureTests
         Assert.False(await pauses.ResumeAsync("agent:a", "founder", "again"));
     }
 
+    /// <summary>Pausing again keeps when the pause began and records the latest who and why, like the runtime.</summary>
+    /// <returns>A task.</returns>
+    [Fact]
+    public async Task AgentPauses_pause_again_replaces_who_and_why()
+    {
+        var clock = new StepClock { Now = SampleInstant };
+        var pauses = new InMemoryAgentPauses(clock);
+        await pauses.PauseAsync("agent:a", "founder", "checking");
+        clock.Now = SampleInstant.AddMinutes(5);
+
+        var again = await pauses.PauseAsync("agent:a", "operator", "still checking");
+
+        Assert.Equal(new PauseState("agent:a", "operator", "still checking", SampleInstant), again);
+    }
+
     /// <summary>The in-memory breaker honors trip and reset.</summary>
     [Fact]
     public async Task CircuitBreaker_honors_trip_and_reset()
@@ -123,5 +138,12 @@ public sealed class FixtureTests
 
         var safety = await new PermissiveSafetyFilter().CheckAsync(new SafetyFilterRequest("c", "k", new Dictionary<string, string>()));
         Assert.True(safety.Allowed);
+    }
+
+    private sealed class StepClock : TimeProvider
+    {
+        public DateTimeOffset Now { get; set; }
+
+        public override DateTimeOffset GetUtcNow() => this.Now;
     }
 }

@@ -122,6 +122,29 @@ public sealed class OperatorDataService(IDbContextFactory<OperatorDbContext> con
     }
 
     /// <inheritdoc />
+    public async Task<bool> TryAddPauseAsync(PauseState pause, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(pause);
+        await using var context = await this.contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        if (await context.Pauses.AnyAsync(row => row.Name == pause.Name, cancellationToken).ConfigureAwait(false))
+        {
+            return false;
+        }
+
+        context.Pauses.Add(new PauseEntity { Name = pause.Name, PausedBy = pause.PausedBy, Reason = pause.Reason, SinceTicks = pause.Since.UtcTicks });
+        try
+        {
+            await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+            return true;
+        }
+        catch (DbUpdateException) when (this.PauseExists(pause.Name))
+        {
+            // Another host paused it between the check and the insert; that pause stands.
+            return false;
+        }
+    }
+
+    /// <inheritdoc />
     public async Task<bool> RemovePauseAsync(string name, CancellationToken cancellationToken)
     {
         await using var context = await this.contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);

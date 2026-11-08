@@ -100,6 +100,94 @@ public sealed class BudgetStopTests
         Assert.Equal(3m, check.Remaining);
     }
 
-    private static CostEvent Spend(decimal amount) =>
-        new(Guid.NewGuid().ToString("N"), AgentId, "tenant", Window, amount, "usd", "model", new DateTimeOffset(2026, 11, 8, 12, 0, 0, TimeSpan.Zero), "corr");
+    /// <summary>A failing audit after the spend is stored never skips the stop.</summary>
+    /// <returns>A task.</returns>
+    [Fact]
+    public async Task Stop_survives_a_failing_recorded_audit()
+    {
+        var fixture = new OperatorFixture(config: TenDollarLimit);
+        fixture.AuditLog.ThrowOn = "operator.cost-guard.recorded";
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.CostGuard.RecordAsync(Spend(10m)));
+
+        Assert.NotNull(await fixture.Pauses.GetAsync("agent:" + AgentId));
+    }
+
+    /// <summary>Once the spend is stored, the stop and its audit do not depend on the caller's token.</summary>
+    /// <returns>A task.</returns>
+    [Fact]
+    public async Task Stop_and_audit_do_not_use_the_callers_token()
+    {
+        var fixture = new OperatorFixture(config: TenDollarLimit);
+        using var cancellation = new CancellationTokenSource();
+
+        await fixture.CostGuard.RecordAsync(Spend(10m), cancellation.Token);
+
+        Assert.NotEmpty(fixture.AuditLog.Tokens);
+        Assert.All(fixture.AuditLog.Tokens, token => Assert.False(token.canBeCanceled, token.eventName));
+    }
+
+    /// <summary>A budget set for the agent without a month applies in every month.</summary>
+    /// <param name="window">The month the spend lands in.</param>
+    /// <returns>A task.</returns>
+    [Theory]
+    [InlineData("2026-11")]
+    [InlineData("2026-12")]
+    public async Task Agent_budget_applies_in_every_month(string window)
+    {
+        var fixture = new OperatorFixture(config: new Dictionary<string, string>(StringComparer.Ordinal) { [$"HoneyDrunk:Operator:Budget:{AgentId}"] = "10" });
+
+        await fixture.CostGuard.RecordAsync(Spend(10m, window));
+
+        Assert.NotNull(await fixture.Pauses.GetAsync("agent:" + AgentId));
+        Assert.False((await fixture.CostGuard.CheckBudgetAsync(AgentId, window, 1m)).Allowed);
+    }
+
+    /// <summary>A budget for one month wins over the agent's standing budget.</summary>
+    /// <returns>A task.</returns>
+    [Fact]
+    public async Task Month_budget_overrides_agent_budget()
+    {
+        var fixture = new OperatorFixture(config: new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [$"HoneyDrunk:Operator:Budget:{AgentId}"] = "100",
+            [$"HoneyDrunk:Operator:Budget:{AgentId}:{Window}"] = "10",
+        });
+
+        await fixture.CostGuard.RecordAsync(Spend(10m));
+
+        Assert.NotNull(await fixture.Pauses.GetAsync("agent:" + AgentId));
+    }
+
+    /// <summary>A person's pause made while the stop is deciding is never overwritten, and no stop is recorded.</summary>
+    /// <returns>A task.</returns>
+    [Fact]
+    public async Task Budget_stop_never_overwrites_a_person_pause()
+    {
+        var store = new InterleavingStore(new State.InMemoryOperatorStore(), new PauseState("agent:" + AgentId, "founder", "checking", DateTimeOffset.UnixEpoch));
+        var fixture = new OperatorFixture(store, TenDollarLimit);
+
+        await fixture.CostGuard.RecordAsync(Spend(10m));
+
+        var pause = await fixture.Pauses.GetAsync("agent:" + AgentId);
+        Assert.Equal("founder", pause!.PausedBy);
+        Assert.Equal("checking", pause.Reason);
+        Assert.DoesNotContain(fixture.AuditLog.Entries, entry => entry.EventName == "operator.cost-guard.budget-stop");
+    }
+
+    /// <summary>An agent id too long for its pause name is refused before any spend is stored.</summary>
+    /// <returns>A task.</returns>
+    [Fact]
+    public async Task Agent_id_too_long_for_a_pause_is_refused()
+    {
+        var fixture = new OperatorFixture(config: TenDollarLimit);
+        var longId = new string('a', 195);
+
+        await Assert.ThrowsAsync<ArgumentException>(() => fixture.CostGuard.RecordAsync(Spend(1m) with { AgentId = longId }));
+
+        Assert.Equal(0m, await fixture.Store.GetSpendAsync(longId, Window, CancellationToken.None));
+    }
+
+    private static CostEvent Spend(decimal amount, string window = Window) =>
+        new(Guid.NewGuid().ToString("N"), AgentId, "tenant", window, amount, "usd", "model", new DateTimeOffset(2026, 11, 8, 12, 0, 0, TimeSpan.Zero), "corr");
 }

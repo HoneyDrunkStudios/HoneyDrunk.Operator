@@ -33,7 +33,8 @@ Since 0.2.0, two contracts let a person act on what the gate and the guard hold:
   overrides every breaker state, including the automatic half-open reset.
 
 The cost guard also stops an agent when its spend in the current UTC month (`CostWindows.Month`) reaches its
-budget: it pauses `agent:{agentId}` once, as `operator:budget`, and only a person lifts that pause. Every
+budget: it pauses `agent:{agentId}` once, as `operator:budget`, and only a person lifts that pause. A budget is read
+from `Budget:{agentId}:{yyyy-MM}` for one month, or `Budget:{agentId}` for every month. Every
 decision, pause, resume and budget stop writes an audit entry.
 
 Requests, decisions, pauses and spend live behind `IOperatorStore`. The default store is in memory; add

@@ -49,6 +49,12 @@ public interface IOperatorStore
     /// <returns>A task.</returns>
     Task SetPauseAsync(PauseState pause, CancellationToken cancellationToken);
 
+    /// <summary>Stores a pause only when none exists for the name; an existing pause is never replaced.</summary>
+    /// <param name="pause">The pause.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>True when this call stored the pause.</returns>
+    Task<bool> TryAddPauseAsync(PauseState pause, CancellationToken cancellationToken);
+
     /// <summary>Removes a pause.</summary>
     /// <param name="name">The breaker name.</param>
     /// <param name="cancellationToken">Cancels the call.</param>

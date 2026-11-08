@@ -3,7 +3,7 @@ using System.Collections.Concurrent;
 
 namespace HoneyDrunk.Operator.Testing;
 
-/// <summary>In-memory <see cref="IAgentPauses"/> for tests. Pausing again keeps the first pause.</summary>
+/// <summary>In-memory <see cref="IAgentPauses"/> for tests. Pausing again keeps when the pause began and replaces who and why.</summary>
 /// <param name="timeProvider">
 /// Optional clock used to stamp pauses (Grid clock policy); defaults to <see cref="TimeProvider.System"/>.
 /// </param>
@@ -16,7 +16,8 @@ public sealed class InMemoryAgentPauses(TimeProvider? timeProvider = null) : IAg
     public Task<PauseState> PauseAsync(string name, string pausedBy, string reason, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        return Task.FromResult(this.pauses.GetOrAdd(name, key => new PauseState(key, pausedBy, reason, this.timeProvider.GetUtcNow())));
+        var now = this.timeProvider.GetUtcNow();
+        return Task.FromResult(this.pauses.AddOrUpdate(name, key => new PauseState(key, pausedBy, reason, now), (_, existing) => existing with { PausedBy = pausedBy, Reason = reason }));
     }
 
     /// <inheritdoc />

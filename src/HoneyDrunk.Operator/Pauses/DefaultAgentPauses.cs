@@ -32,7 +32,7 @@ public sealed class DefaultAgentPauses(
         var existing = await this.store.GetPauseAsync(name, cancellationToken).ConfigureAwait(false);
         var pause = new PauseState(name, pausedBy, reason, existing?.Since ?? this.timeProvider.GetUtcNow());
         await this.store.SetPauseAsync(pause, cancellationToken).ConfigureAwait(false);
-        await this.audit.WriteAsync("operator.pauses.paused", pausedBy, AuditOutcome.Succeeded, new AuditTarget("pause", name), reason, cancellationToken: cancellationToken).ConfigureAwait(false);
+        await this.audit.WriteAsync("operator.pauses.paused", pausedBy, AuditOutcome.Succeeded, new AuditTarget("pause", name), reason, cancellationToken: CancellationToken.None).ConfigureAwait(false);
         return pause;
     }
 
@@ -48,7 +48,7 @@ public sealed class DefaultAgentPauses(
             return false;
         }
 
-        await this.audit.WriteAsync("operator.pauses.resumed", resumedBy, AuditOutcome.Succeeded, new AuditTarget("pause", name), reason, cancellationToken: cancellationToken).ConfigureAwait(false);
+        await this.audit.WriteAsync("operator.pauses.resumed", resumedBy, AuditOutcome.Succeeded, new AuditTarget("pause", name), reason, cancellationToken: CancellationToken.None).ConfigureAwait(false);
         return true;
     }
 

@@ -61,7 +61,7 @@ public sealed class DefaultApprovalDesk(
             outcome == ApprovalOutcome.Approved ? AuditOutcome.Succeeded : AuditOutcome.Denied,
             new AuditTarget("approval", approvalId),
             reason,
-            cancellationToken: cancellationToken).ConfigureAwait(false);
+            cancellationToken: CancellationToken.None).ConfigureAwait(false);
         return decision;
     }
 
