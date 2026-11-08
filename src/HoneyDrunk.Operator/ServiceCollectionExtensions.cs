@@ -4,8 +4,10 @@ using HoneyDrunk.Operator.Audit;
 using HoneyDrunk.Operator.Breaker;
 using HoneyDrunk.Operator.Cost;
 using HoneyDrunk.Operator.Events;
+using HoneyDrunk.Operator.Pauses;
 using HoneyDrunk.Operator.Policy;
 using HoneyDrunk.Operator.Safety;
+using HoneyDrunk.Operator.State;
 using HoneyDrunk.Operator.Telemetry;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -47,6 +49,9 @@ public static class ServiceCollectionExtensions
         services.TryAddApprovalSink();
         services.AddSingleton<ApprovalEventEmitter>();
 
+        services.TryAddSingleton<IOperatorStore, InMemoryOperatorStore>();
+        services.AddSingleton<IAgentPauses, DefaultAgentPauses>();
+        services.AddSingleton<IApprovalDesk, DefaultApprovalDesk>();
         services.AddSingleton<IApprovalGate, DefaultApprovalGate>();
         services.AddSingleton<ICircuitBreaker, DefaultCircuitBreaker>();
         services.AddSingleton<ICostGuard, DefaultCostGuard>();

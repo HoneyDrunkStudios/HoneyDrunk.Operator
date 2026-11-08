@@ -2,51 +2,47 @@ using HoneyDrunk.Audit.Abstractions;
 using HoneyDrunk.Operator.Abstractions;
 using HoneyDrunk.Operator.Audit;
 using HoneyDrunk.Operator.Events;
+using HoneyDrunk.Operator.State;
 using HoneyDrunk.Operator.Telemetry;
-using System.Collections.Concurrent;
 
 namespace HoneyDrunk.Operator.Approval;
 
 /// <summary>
-/// Default <see cref="IApprovalGate"/> that records a pending approval, emits an approval-needed
-/// event (event-out per ADR-0018 D8), and returns immediately. Consumers poll
-/// <see cref="CheckStatusAsync"/> or subscribe to the emitted event for the final decision.
+/// The default <see cref="IApprovalGate"/>. Requests and decisions live in the <see cref="IOperatorStore"/>, so they
+/// survive a restart when the store is durable. A new request never overwrites a decision already recorded, and a
+/// pending request past its expiry is reported, once and for all, as <see cref="ApprovalOutcome.Expired"/>.
 /// </summary>
-/// <remarks>
-/// Durable persistence of approval state (via HoneyDrunk.Data's repository surface per ADR-0018 D12)
-/// is deferred to a follow-up packet; v0.1.0 holds in-flight approvals in process.
-/// </remarks>
-/// <param name="emitter">The approval event emitter.</param>
-/// <param name="telemetry">The Operator telemetry helper.</param>
-/// <param name="audit">The Operator audit writer.</param>
-/// <param name="timeProvider">The clock used to stamp decisions and age out expiries (Grid clock policy).</param>
+/// <param name="emitter">Emits the approval-requested event.</param>
+/// <param name="telemetry">Operator telemetry.</param>
+/// <param name="audit">The audit writer.</param>
+/// <param name="timeProvider">The clock.</param>
+/// <param name="store">Where requests and decisions are kept.</param>
 public sealed class DefaultApprovalGate(
     ApprovalEventEmitter emitter,
     OperatorTelemetry telemetry,
     OperatorAuditWriter audit,
-    TimeProvider timeProvider) : IApprovalGate
+    TimeProvider timeProvider,
+    IOperatorStore store) : IApprovalGate
 {
     private readonly ApprovalEventEmitter emitter = emitter ?? throw new ArgumentNullException(nameof(emitter));
     private readonly OperatorTelemetry telemetry = telemetry ?? throw new ArgumentNullException(nameof(telemetry));
     private readonly OperatorAuditWriter audit = audit ?? throw new ArgumentNullException(nameof(audit));
     private readonly TimeProvider timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
-
-    // TODO(data): persist pending approvals via HoneyDrunk.Data's IRepository per ADR-0018 D12.
-    private readonly ConcurrentDictionary<string, ApprovalDecision> decisions = new(StringComparer.Ordinal);
-
-    // Expiry is carried on the request, not the decision, so a pending decision can be aged out
-    // to Expired on read. Held alongside the decision until durable persistence lands.
-    private readonly ConcurrentDictionary<string, DateTimeOffset> expiries = new(StringComparer.Ordinal);
+    private readonly IOperatorStore store = store ?? throw new ArgumentNullException(nameof(store));
 
     /// <inheritdoc />
     public async Task<ApprovalDecision> RequestAsync(ApprovalRequest request, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.ApprovalId);
         using var activity = this.telemetry.Start("approval-gate", "request");
-
-        var pending = new ApprovalDecision(request.ApprovalId, ApprovalOutcome.Pending, string.Empty, this.timeProvider.GetUtcNow(), null);
-        this.decisions[request.ApprovalId] = pending;
-        this.expiries[request.ApprovalId] = request.Expiry;
+        var now = this.timeProvider.GetUtcNow();
+        var pending = new ApprovalDecision(request.ApprovalId, ApprovalOutcome.Pending, string.Empty, now, null);
+        if (!await this.store.TryAddApprovalAsync(new StoredApproval(request, pending, now), cancellationToken).ConfigureAwait(false))
+        {
+            // The id is known: return what is recorded rather than resetting it to Pending.
+            return (await this.CheckStatusAsync(request.ApprovalId, cancellationToken).ConfigureAwait(false))!;
+        }
 
         await this.emitter.EmitAsync(request, cancellationToken).ConfigureAwait(false);
         await this.audit.WriteAsync(
@@ -57,32 +53,14 @@ public sealed class DefaultApprovalGate(
             request.Action,
             request.RequesterCorrelationId,
             cancellationToken).ConfigureAwait(false);
-
         return pending;
     }
 
     /// <inheritdoc />
-    public Task<ApprovalDecision?> CheckStatusAsync(string approvalId, CancellationToken cancellationToken = default)
+    public async Task<ApprovalDecision?> CheckStatusAsync(string approvalId, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(approvalId);
         using var activity = this.telemetry.Start("approval-gate", "check-status");
-        if (!this.decisions.TryGetValue(approvalId, out var decision))
-        {
-            return Task.FromResult<ApprovalDecision?>(null);
-        }
-
-        // A still-pending request whose expiry has passed is reported as Expired, so a caller
-        // polling the gate can never observe Pending indefinitely. Persist the transition once and
-        // drop the expiry entry so it isn't recomputed on every later poll.
-        if (decision.Outcome == ApprovalOutcome.Pending
-            && this.expiries.TryGetValue(approvalId, out var expiry)
-            && this.timeProvider.GetUtcNow() > expiry)
-        {
-            decision = decision with { Outcome = ApprovalOutcome.Expired, Reason = "Approval request expired before a decision was recorded." };
-            this.decisions[approvalId] = decision;
-            this.expiries.TryRemove(approvalId, out _);
-        }
-
-        return Task.FromResult<ApprovalDecision?>(decision);
+        return await ApprovalExpiry.CurrentAsync(this.store, approvalId, this.timeProvider.GetUtcNow(), cancellationToken).ConfigureAwait(false);
     }
 }
