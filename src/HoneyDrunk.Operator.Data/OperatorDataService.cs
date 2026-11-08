@@ -41,9 +41,10 @@ public sealed class OperatorDataService(IDbContextFactory<OperatorDbContext> con
             await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
             return true;
         }
-        catch (DbUpdateException)
+        catch (DbUpdateException) when (this.ApprovalExists(approval.Request.ApprovalId))
         {
-            // Another host added the same id between the check and the insert; its row is kept.
+            // Another host added the same id between the check and the insert; its row is kept. Any other failure
+            // propagates, so a write that never happened is not mistaken for an existing request.
             return false;
         }
     }
@@ -113,9 +114,10 @@ public sealed class OperatorDataService(IDbContextFactory<OperatorDbContext> con
         {
             await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         }
-        catch (DbUpdateException)
+        catch (DbUpdateException) when (this.PauseExists(pause.Name))
         {
-            // Another host paused it first; a pause is in place either way.
+            // Another host paused it first; a pause is in place either way. Any other failure propagates: a pause
+            // that was never written must not look like one that was.
         }
     }
 
@@ -149,7 +151,7 @@ public sealed class OperatorDataService(IDbContextFactory<OperatorDbContext> con
                 await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
                 return amount;
             }
-            catch (DbUpdateException)
+            catch (DbUpdateException) when (this.SpendExists(scope, window))
             {
                 // Another writer created the row first; add to it on the next pass.
                 context.ChangeTracker.Clear();
@@ -171,7 +173,26 @@ public sealed class OperatorDataService(IDbContextFactory<OperatorDbContext> con
         return (micros ?? 0) / MicrosPerUnit;
     }
 
-    private static long ToMicros(decimal amount) => (long)decimal.Round(amount * MicrosPerUnit, MidpointRounding.AwayFromZero);
+    // Rounds up, so a positive charge smaller than one micro-unit still counts towards the budget.
+    private static long ToMicros(decimal amount) => (long)decimal.Ceiling(amount * MicrosPerUnit);
+
+    private bool ApprovalExists(string approvalId)
+    {
+        using var context = this.contexts.CreateDbContext();
+        return context.Approvals.Any(row => row.ApprovalId == approvalId);
+    }
+
+    private bool PauseExists(string name)
+    {
+        using var context = this.contexts.CreateDbContext();
+        return context.Pauses.Any(row => row.Name == name);
+    }
+
+    private bool SpendExists(string scope, string window)
+    {
+        using var context = this.contexts.CreateDbContext();
+        return context.Spend.Any(row => row.Scope == scope && row.Window == window);
+    }
 
     private static DateTimeOffset FromTicks(long ticks) => new(ticks, TimeSpan.Zero);
 

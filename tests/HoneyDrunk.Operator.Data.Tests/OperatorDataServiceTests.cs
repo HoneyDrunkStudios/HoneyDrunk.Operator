@@ -37,6 +37,41 @@ public sealed class OperatorDataServiceTests : OperatorStoreContract, IDisposabl
         Assert.Equal(2.25m, await after.GetSpendAsync("agent-a", "2026-11", CancellationToken.None));
     }
 
+    /// <summary>A charge smaller than one micro-unit rounds up, so no positive charge is ever lost.</summary>
+    /// <returns>A task.</returns>
+    [Fact]
+    public async Task Tiny_charge_rounds_up_and_is_never_lost()
+    {
+        var store = this.CreateStore();
+
+        await store.AddSpendAsync("agent-a", "2026-11", 0.0000001m, CancellationToken.None);
+        var total = await store.AddSpendAsync("agent-a", "2026-11", 0.0000001m, CancellationToken.None);
+
+        Assert.Equal(0.000002m, total);
+    }
+
+    /// <summary>A pause that fails to write for any reason but a duplicate surfaces the failure.</summary>
+    /// <returns>A task.</returns>
+    [Fact]
+    public async Task Failed_pause_write_is_not_swallowed()
+    {
+        var store = this.CreateStore();
+
+        await Assert.ThrowsAsync<DbUpdateException>(() => store.SetPauseAsync(new PauseState("agent:a", null!, "checking", Now), CancellationToken.None));
+        Assert.Null(await store.GetPauseAsync("agent:a", CancellationToken.None));
+    }
+
+    /// <summary>An approval that fails to write is not reported as an existing id.</summary>
+    /// <returns>A task.</returns>
+    [Fact]
+    public async Task Failed_approval_write_is_not_reported_as_duplicate()
+    {
+        var store = this.CreateStore();
+        var request = new ApprovalRequest("a1", null!, "tool.x", new Dictionary<string, string>(), "capability/x/1.0.0", Now.AddHours(1), "corr");
+
+        await Assert.ThrowsAsync<DbUpdateException>(() => store.TryAddApprovalAsync(new StoredApproval(request, new ApprovalDecision("a1", ApprovalOutcome.Pending, string.Empty, Now, null), Now), CancellationToken.None));
+    }
+
     /// <summary>Registration replaces the in-memory store whichever order the host calls it in.</summary>
     [Fact]
     public void Data_store_replaces_inmemory()
