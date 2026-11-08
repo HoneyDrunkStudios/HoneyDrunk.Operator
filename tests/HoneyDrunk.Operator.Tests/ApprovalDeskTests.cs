@@ -21,6 +21,31 @@ public sealed class ApprovalDeskTests
         Assert.Equal(ApprovalOutcome.Approved, (await fixture.Gate.CheckStatusAsync("a1"))!.Outcome);
     }
 
+    /// <summary>An id already used for one request cannot carry a different request to its decision.</summary>
+    /// <param name="change">What differs in the second request.</param>
+    /// <returns>A task.</returns>
+    [Theory]
+    [InlineData("action")]
+    [InlineData("subject")]
+    [InlineData("scope")]
+    [InlineData("context")]
+    public async Task Rerequest_with_different_content_is_refused(string change)
+    {
+        var fixture = new OperatorFixture();
+        var original = fixture.Request();
+        await fixture.Gate.RequestAsync(original);
+        await fixture.Desk.DecideAsync("a1", ApprovalOutcome.Approved, "founder", "looks fine");
+        var different = change switch
+        {
+            "action" => original with { Action = "tool.delete-everything" },
+            "subject" => original with { Subject = "agent:someone-else" },
+            "scope" => original with { RequestedScope = "capability/other/1.0.0" },
+            _ => original with { Context = new Dictionary<string, string> { ["tool"] = "other" } },
+        };
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Gate.RequestAsync(different));
+    }
+
     /// <summary>An approval is visible to the gate.</summary>
     /// <returns>A task.</returns>
     [Fact]

@@ -40,7 +40,14 @@ public sealed class DefaultApprovalGate(
         var pending = new ApprovalDecision(request.ApprovalId, ApprovalOutcome.Pending, string.Empty, now, null);
         if (!await this.store.TryAddApprovalAsync(new StoredApproval(request, pending, now), cancellationToken).ConfigureAwait(false))
         {
-            // The id is known: return what is recorded rather than resetting it to Pending.
+            // The id is known. Only the same request may read its recorded decision; an id reused for a different
+            // action, subject, scope or context must never inherit another request's approval.
+            var stored = await this.store.GetApprovalAsync(request.ApprovalId, cancellationToken).ConfigureAwait(false);
+            if (stored is null || !SameRequest(stored.Request, request))
+            {
+                throw new InvalidOperationException($"Approval id '{request.ApprovalId}' is already used for a different request.");
+            }
+
             return (await this.CheckStatusAsync(request.ApprovalId, cancellationToken).ConfigureAwait(false))!;
         }
 
@@ -63,4 +70,11 @@ public sealed class DefaultApprovalGate(
         using var activity = this.telemetry.Start("approval-gate", "check-status");
         return await ApprovalExpiry.CurrentAsync(this.store, approvalId, this.timeProvider.GetUtcNow(), cancellationToken).ConfigureAwait(false);
     }
+
+    private static bool SameRequest(ApprovalRequest stored, ApprovalRequest incoming) =>
+        string.Equals(stored.Subject, incoming.Subject, StringComparison.Ordinal)
+        && string.Equals(stored.Action, incoming.Action, StringComparison.Ordinal)
+        && string.Equals(stored.RequestedScope, incoming.RequestedScope, StringComparison.Ordinal)
+        && stored.Context.Count == incoming.Context.Count
+        && stored.Context.All(pair => incoming.Context.TryGetValue(pair.Key, out var value) && string.Equals(value, pair.Value, StringComparison.Ordinal));
 }
