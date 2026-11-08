@@ -38,4 +38,7 @@ public sealed class ApprovalEntity
 
     /// <summary>Gets or sets why.</summary>
     public string? Reason { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether the recorded decision's audit entry has been written.</summary>
+    public bool DecisionAudited { get; set; }
 }

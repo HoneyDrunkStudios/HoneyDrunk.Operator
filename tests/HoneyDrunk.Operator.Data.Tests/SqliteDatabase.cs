@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 
 namespace HoneyDrunk.Operator.Data.Tests;
 
@@ -7,10 +8,10 @@ internal sealed class SqliteDatabase : IDisposable
 {
     private readonly string path = Path.Join(Path.GetTempPath(), "operator-" + Guid.NewGuid().ToString("N") + ".db");
 
-    public SqliteDatabase()
+    public SqliteDatabase(params IInterceptor[] interceptors)
     {
         this.ConnectionString = $"Data Source={this.path};Default Timeout=30;Pooling=False";
-        this.Factory = new ContextFactory(this.ConnectionString);
+        this.Factory = new ContextFactory(this.ConnectionString, interceptors);
         using var context = this.Factory.CreateDbContext();
         context.Database.EnsureCreated();
     }
@@ -31,9 +32,9 @@ internal sealed class SqliteDatabase : IDisposable
         }
     }
 
-    private sealed class ContextFactory(string connectionString) : IDbContextFactory<OperatorDbContext>
+    private sealed class ContextFactory(string connectionString, IInterceptor[] interceptors) : IDbContextFactory<OperatorDbContext>
     {
         public OperatorDbContext CreateDbContext() =>
-            new(new DbContextOptionsBuilder<OperatorDbContext>().UseSqlite(connectionString).Options);
+            new(new DbContextOptionsBuilder<OperatorDbContext>().UseSqlite(connectionString).AddInterceptors(interceptors).Options);
     }
 }

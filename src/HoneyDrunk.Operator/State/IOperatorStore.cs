@@ -30,6 +30,12 @@ public interface IOperatorStore
     /// <returns>True when the decision was replaced.</returns>
     Task<bool> TryUpdateDecisionAsync(string approvalId, ApprovalOutcome expected, ApprovalDecision decision, CancellationToken cancellationToken);
 
+    /// <summary>Marks the recorded decision of an approval as audited.</summary>
+    /// <param name="approvalId">The approval id.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>A task.</returns>
+    Task MarkDecisionAuditedAsync(string approvalId, CancellationToken cancellationToken);
+
     /// <summary>Lists pending approvals that have not expired at <paramref name="now"/>, newest first.</summary>
     /// <param name="now">The current time.</param>
     /// <param name="limit">The most to return.</param>

@@ -18,6 +18,8 @@ internal sealed class InterleavingStore(IOperatorStore inner, PauseState personP
     public Task<bool> TryUpdateDecisionAsync(string approvalId, ApprovalOutcome expected, ApprovalDecision decision, CancellationToken cancellationToken) =>
         inner.TryUpdateDecisionAsync(approvalId, expected, decision, cancellationToken);
 
+    public Task MarkDecisionAuditedAsync(string approvalId, CancellationToken cancellationToken) => inner.MarkDecisionAuditedAsync(approvalId, cancellationToken);
+
     public Task<IReadOnlyList<StoredApproval>> ListPendingAsync(DateTimeOffset now, int limit, CancellationToken cancellationToken) => inner.ListPendingAsync(now, limit, cancellationToken);
 
     public async Task<PauseState?> GetPauseAsync(string name, CancellationToken cancellationToken)

@@ -8,4 +8,4 @@ All notable changes to this package are documented here. The format follows
 
 ### Added
 
-- First release: `OperatorDataService`, an `IOperatorStore` over HoneyDrunk.Data.EntityFramework, and `AddOperatorDataStore`.
+- First release: `AddOperatorDataStore` registers a durable `IOperatorStore` over HoneyDrunk.Data.EntityFramework, built from `ApprovalDataService`, `PauseDataService` and `SpendDataService`.

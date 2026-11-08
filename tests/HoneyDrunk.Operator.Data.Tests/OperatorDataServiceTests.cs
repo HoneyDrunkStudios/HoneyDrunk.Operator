@@ -11,6 +11,7 @@ namespace HoneyDrunk.Operator.Data.Tests;
 public sealed class OperatorDataServiceTests : OperatorStoreContract, IDisposable
 {
     private readonly SqliteDatabase database = new();
+    private readonly List<ServiceProvider> providers = [];
 
     /// <summary>Everything written through one store reads back the same through a new one over the same database.</summary>
     /// <returns>A task.</returns>
@@ -50,6 +51,35 @@ public sealed class OperatorDataServiceTests : OperatorStoreContract, IDisposabl
         Assert.Equal(0.000002m, total);
     }
 
+    /// <summary>A caller cancelling after the spend update has committed still gets the new total.</summary>
+    /// <returns>A task.</returns>
+    [Fact]
+    public async Task Total_is_returned_when_cancelled_after_the_update()
+    {
+        var interceptor = new CancelAfterSpendUpdate();
+        using var database = new SqliteDatabase(interceptor);
+        var store = this.Store(options => options.UseSqlite(database.ConnectionString).AddInterceptors(interceptor));
+        await store.AddSpendAsync("agent-a", "2026-11", 6m, CancellationToken.None);
+
+        var total = await store.AddSpendAsync("agent-a", "2026-11", 4m, interceptor.Cancellation.Token);
+
+        Assert.True(interceptor.Cancellation.IsCancellationRequested);
+        Assert.Equal(10m, total);
+    }
+
+    /// <summary>The first charge in a window returns the total as stored, rounded up.</summary>
+    /// <returns>A task.</returns>
+    [Fact]
+    public async Task First_charge_returns_the_stored_total()
+    {
+        var store = this.CreateStore();
+
+        var total = await store.AddSpendAsync("agent-a", "2026-11", 0.9999999m, CancellationToken.None);
+
+        Assert.Equal(1m, total);
+        Assert.Equal(1m, await store.GetSpendAsync("agent-a", "2026-11", CancellationToken.None));
+    }
+
     /// <summary>A pause that fails to write for any reason but a duplicate surfaces the failure.</summary>
     /// <returns>A task.</returns>
     [Fact]
@@ -82,12 +112,29 @@ public sealed class OperatorDataServiceTests : OperatorStoreContract, IDisposabl
 
         using var provider = services.BuildServiceProvider();
 
-        Assert.IsType<OperatorDataService>(provider.GetRequiredService<IOperatorStore>());
+        Assert.Equal(typeof(OperatorDbContext).Assembly, provider.GetRequiredService<IOperatorStore>().GetType().Assembly);
     }
 
     /// <inheritdoc />
-    public void Dispose() => this.database.Dispose();
+    public void Dispose()
+    {
+        foreach (var provider in this.providers)
+        {
+            provider.Dispose();
+        }
+
+        this.database.Dispose();
+    }
 
     /// <inheritdoc />
-    protected override IOperatorStore CreateStore() => new OperatorDataService(this.database.Factory);
+    protected override IOperatorStore CreateStore() => this.Store(options => options.UseSqlite(this.database.ConnectionString));
+
+    private IOperatorStore Store(Action<DbContextOptionsBuilder> configure)
+    {
+        var services = new ServiceCollection();
+        services.AddOperatorDataStore(configure);
+        var provider = services.BuildServiceProvider();
+        this.providers.Add(provider);
+        return provider.GetRequiredService<IOperatorStore>();
+    }
 }

@@ -55,6 +55,20 @@ public sealed class InMemoryOperatorStore : IOperatorStore
     }
 
     /// <inheritdoc />
+    public Task MarkDecisionAuditedAsync(string approvalId, CancellationToken cancellationToken)
+    {
+        while (this.approvals.TryGetValue(approvalId, out var current) && !current.DecisionAudited)
+        {
+            if (this.approvals.TryUpdate(approvalId, current with { DecisionAudited = true }, current))
+            {
+                break;
+            }
+        }
+
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
     public Task<PauseState?> GetPauseAsync(string name, CancellationToken cancellationToken) =>
         Task.FromResult(this.pauses.GetValueOrDefault(name));
 

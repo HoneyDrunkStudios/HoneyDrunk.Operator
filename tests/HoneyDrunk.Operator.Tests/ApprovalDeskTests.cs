@@ -271,6 +271,39 @@ public sealed class ApprovalDeskTests
         Assert.All(fixture.AuditLog.Tokens, token => Assert.False(token.canBeCanceled, token.eventName));
     }
 
+    /// <summary>A decision whose audit entry failed is audited when the same decision is made again.</summary>
+    /// <returns>A task.</returns>
+    [Fact]
+    public async Task Decision_audit_is_retried_after_a_sink_failure()
+    {
+        var fixture = new OperatorFixture();
+        await fixture.Gate.RequestAsync(fixture.Request());
+        fixture.AuditLog.ThrowOn = "operator.approval-desk.decided";
+        await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Desk.DecideAsync("a1", ApprovalOutcome.Approved, "founder", "fine"));
+        fixture.AuditLog.ThrowOn = null;
+
+        var again = await fixture.Desk.DecideAsync("a1", ApprovalOutcome.Approved, "founder", "fine");
+
+        Assert.Equal(ApprovalOutcome.Approved, again!.Outcome);
+        var entry = Assert.Single(fixture.AuditLog.Entries, item => item.EventName == "operator.approval-desk.decided");
+        Assert.Equal("founder", entry.Actor);
+        Assert.True((await fixture.Store.GetApprovalAsync("a1", CancellationToken.None))!.DecisionAudited);
+    }
+
+    /// <summary>An audited decision made again is not audited a second time.</summary>
+    /// <returns>A task.</returns>
+    [Fact]
+    public async Task Audited_decision_is_not_audited_again()
+    {
+        var fixture = new OperatorFixture();
+        await fixture.Gate.RequestAsync(fixture.Request());
+        await fixture.Desk.DecideAsync("a1", ApprovalOutcome.Approved, "founder", "fine");
+
+        await fixture.Desk.DecideAsync("a1", ApprovalOutcome.Approved, "founder", "fine");
+
+        Assert.Single(fixture.AuditLog.Entries, item => item.EventName == "operator.approval-desk.decided");
+    }
+
     private static async Task<bool> Attempt(Func<Task<ApprovalDecision?>> decide)
     {
         try

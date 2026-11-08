@@ -44,7 +44,7 @@ public sealed class DefaultApprovalDesk(
         var current = await ApprovalExpiry.CurrentAsync(this.store, approvalId, now, cancellationToken).ConfigureAwait(false);
         if (current is null || current.Outcome != ApprovalOutcome.Pending)
         {
-            return Settled(current, outcome);
+            return await this.SettledAsync(current, outcome).ConfigureAwait(false);
         }
 
         var decision = new ApprovalDecision(approvalId, outcome, approver, now, reason);
@@ -52,16 +52,10 @@ public sealed class DefaultApprovalDesk(
         {
             // Another decision landed first.
             var stored = (await this.store.GetApprovalAsync(approvalId, cancellationToken).ConfigureAwait(false))?.Decision;
-            return Settled(stored, outcome);
+            return await this.SettledAsync(stored, outcome).ConfigureAwait(false);
         }
 
-        await this.audit.WriteAsync(
-            "operator.approval-desk.decided",
-            approver,
-            outcome == ApprovalOutcome.Approved ? AuditOutcome.Succeeded : AuditOutcome.Denied,
-            new AuditTarget("approval", approvalId),
-            reason,
-            cancellationToken: CancellationToken.None).ConfigureAwait(false);
+        await this.AuditDecisionAsync(decision).ConfigureAwait(false);
         return decision;
     }
 
@@ -73,6 +67,33 @@ public sealed class DefaultApprovalDesk(
         using var activity = this.telemetry.Start("approval-desk", "list-pending");
         var pending = await this.store.ListPendingAsync(this.timeProvider.GetUtcNow(), limit, cancellationToken).ConfigureAwait(false);
         return pending.Select(item => new PendingApproval(item.Request, item.RequestedAt)).ToArray();
+    }
+
+    // The decision is stored. Its audit entry and the mark that it was written ignore the caller's cancellation; if the
+    // audit sink fails, the mark stays unset and the same decision made again writes the entry then.
+    private async Task AuditDecisionAsync(ApprovalDecision decision)
+    {
+        await this.audit.WriteAsync(
+            "operator.approval-desk.decided",
+            decision.ApproverIdentity,
+            decision.Outcome == ApprovalOutcome.Approved ? AuditOutcome.Succeeded : AuditOutcome.Denied,
+            new AuditTarget("approval", decision.ApprovalId),
+            decision.Reason,
+            cancellationToken: CancellationToken.None).ConfigureAwait(false);
+        await this.store.MarkDecisionAuditedAsync(decision.ApprovalId, CancellationToken.None).ConfigureAwait(false);
+    }
+
+    // The same decision again completes an audit entry that failed earlier; it never writes a second one.
+    private async Task<ApprovalDecision?> SettledAsync(ApprovalDecision? stored, ApprovalOutcome requested)
+    {
+        var settled = Settled(stored, requested);
+        if (settled is not null && settled.Outcome == requested
+            && await this.store.GetApprovalAsync(settled.ApprovalId, CancellationToken.None).ConfigureAwait(false) is { DecisionAudited: false } record)
+        {
+            await this.AuditDecisionAsync(record.Decision).ConfigureAwait(false);
+        }
+
+        return settled;
     }
 
     // An already-settled approval: the same decision again is a no-op, Expired is reported, anything else conflicts.

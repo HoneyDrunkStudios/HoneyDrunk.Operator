@@ -10,7 +10,7 @@ namespace HoneyDrunk.Operator.Data;
 public static class OperatorDataServiceCollectionExtensions
 {
     /// <summary>
-    /// Registers <see cref="OperatorDbContext"/> through HoneyDrunk.Data and makes <see cref="OperatorDataService"/> the
+    /// Registers <see cref="OperatorDbContext"/> through HoneyDrunk.Data and makes the Data store the
     /// <see cref="IOperatorStore"/>, replacing the in-memory default whether this is called before or after
     /// <c>AddHoneyDrunkOperator</c>. The host creates the <c>operator</c> schema (migrations or <c>EnsureCreated</c>).
     /// </summary>
@@ -23,7 +23,13 @@ public static class OperatorDataServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(configureDbContext);
         services.AddHoneyDrunkDataEntityFramework<OperatorDbContext>(configureDbContext);
         services.RemoveAll<IOperatorStore>();
-        services.AddSingleton<IOperatorStore, OperatorDataService>();
+        services.TryAddSingleton<ApprovalDataService>();
+        services.TryAddSingleton<PauseDataService>();
+        services.TryAddSingleton<SpendDataService>();
+        services.AddSingleton<IOperatorStore>(provider => new OperatorDataStore(
+            provider.GetRequiredService<ApprovalDataService>(),
+            provider.GetRequiredService<PauseDataService>(),
+            provider.GetRequiredService<SpendDataService>()));
         return services;
     }
 }

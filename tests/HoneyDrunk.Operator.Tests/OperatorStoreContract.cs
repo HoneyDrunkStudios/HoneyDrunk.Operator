@@ -72,6 +72,22 @@ public abstract class OperatorStoreContract
         Assert.Equal(context.OrderBy(pair => pair.Key, StringComparer.Ordinal), stored!.Request.Context.OrderBy(pair => pair.Key, StringComparer.Ordinal));
     }
 
+    /// <summary>A decision starts unaudited and is marked audited once its audit entry is written.</summary>
+    /// <returns>A task.</returns>
+    [Fact]
+    public async Task Decision_audit_mark_round_trips()
+    {
+        var store = this.CreateStore();
+        var request = new ApprovalRequest("a1", "agent:a", "tool.x", new Dictionary<string, string>(), "capability/x/1.0.0", Now.AddHours(1), "corr");
+        await store.TryAddApprovalAsync(new StoredApproval(request, new ApprovalDecision("a1", ApprovalOutcome.Pending, string.Empty, Now, null), Now), CancellationToken.None);
+        await store.TryUpdateDecisionAsync("a1", ApprovalOutcome.Pending, new ApprovalDecision("a1", ApprovalOutcome.Approved, "founder", Now, "fine"), CancellationToken.None);
+        Assert.False((await store.GetApprovalAsync("a1", CancellationToken.None))!.DecisionAudited);
+
+        await store.MarkDecisionAuditedAsync("a1", CancellationToken.None);
+
+        Assert.True((await store.GetApprovalAsync("a1", CancellationToken.None))!.DecisionAudited);
+    }
+
     /// <summary>Adding a pause inserts only when none exists, and never replaces one.</summary>
     /// <returns>A task.</returns>
     [Fact]
