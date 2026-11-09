@@ -8,6 +8,7 @@ using HoneyDrunk.Operator.Events;
 using HoneyDrunk.Operator.Pauses;
 using HoneyDrunk.Operator.State;
 using HoneyDrunk.Operator.Telemetry;
+using HoneyDrunk.Vault.Abstractions;
 using NSubstitute;
 
 namespace HoneyDrunk.Operator.Tests;
@@ -15,13 +16,13 @@ namespace HoneyDrunk.Operator.Tests;
 /// <summary>The Operator runtime over one store, clock and recording audit log.</summary>
 internal sealed class OperatorFixture
 {
-    public OperatorFixture(IOperatorStore? store = null, IReadOnlyDictionary<string, string>? config = null)
+    public OperatorFixture(IOperatorStore? store = null, IReadOnlyDictionary<string, string>? config = null, IConfigProvider? configProvider = null)
     {
         this.Store = store ?? new InMemoryOperatorStore();
         var telemetry = new OperatorTelemetry(Substitute.For<ITelemetryActivityFactory>());
         var audit = new OperatorAuditWriter([this.AuditLog]);
         var options = Microsoft.Extensions.Options.Options.Create(new OperatorOptions());
-        var configProvider = TestDoubles.ConfigProvider(config);
+        configProvider ??= TestDoubles.ConfigProvider(config);
         this.Gate = new DefaultApprovalGate(new ApprovalEventEmitter(this.Sink, telemetry), telemetry, audit, this.Clock, this.Store);
         this.Desk = new DefaultApprovalDesk(this.Store, audit, telemetry, this.Clock);
         this.Pauses = new DefaultAgentPauses(this.Store, audit, telemetry, this.Clock);

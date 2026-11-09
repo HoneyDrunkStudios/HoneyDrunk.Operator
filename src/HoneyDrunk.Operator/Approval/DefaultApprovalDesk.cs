@@ -8,7 +8,8 @@ namespace HoneyDrunk.Operator.Approval;
 
 /// <summary>
 /// The default <see cref="IApprovalDesk"/>. A person's decision is written with compare-and-set on the pending
-/// state, so of two people deciding at once exactly one decision is stored, and it is audited once.
+/// state, so of two people deciding at once exactly one decision is stored. Its audit entry is written once, by the
+/// caller that claims it in the store.
 /// </summary>
 /// <param name="store">Where requests and decisions are kept.</param>
 /// <param name="audit">The audit writer.</param>
@@ -22,6 +23,9 @@ public sealed class DefaultApprovalDesk(
 {
     /// <summary>The most pending approvals returned by one call.</summary>
     public const int MaxPendingPage = 100;
+
+    /// <summary>How long a claim on writing a decision's audit entry lasts if its writer neither finishes nor releases it.</summary>
+    public static readonly TimeSpan AuditClaimLease = TimeSpan.FromMinutes(1);
 
     private readonly IOperatorStore store = store ?? throw new ArgumentNullException(nameof(store));
     private readonly OperatorAuditWriter audit = audit ?? throw new ArgumentNullException(nameof(audit));
@@ -69,17 +73,34 @@ public sealed class DefaultApprovalDesk(
         return pending.Select(item => new PendingApproval(item.Request, item.RequestedAt)).ToArray();
     }
 
-    // The decision is stored. Its audit entry and the mark that it was written ignore the caller's cancellation; if the
-    // audit sink fails, the mark stays unset and the same decision made again writes the entry then.
+    // The decision is stored. Only the caller holding the store's claim writes its audit entry, so callers deciding the
+    // same way at once, on any host, write one entry. The claim, the entry and the mark ignore the caller's
+    // cancellation. If the audit sink fails, the claim is released and the same decision made again writes the entry;
+    // a claim whose holder died lapses after AuditClaimLease.
     private async Task AuditDecisionAsync(ApprovalDecision decision)
     {
-        await this.audit.WriteAsync(
-            "operator.approval-desk.decided",
-            decision.ApproverIdentity,
-            decision.Outcome == ApprovalOutcome.Approved ? AuditOutcome.Succeeded : AuditOutcome.Denied,
-            new AuditTarget("approval", decision.ApprovalId),
-            decision.Reason,
-            cancellationToken: CancellationToken.None).ConfigureAwait(false);
+        var now = this.timeProvider.GetUtcNow();
+        if (!await this.store.TryClaimDecisionAuditAsync(decision.ApprovalId, now, now + AuditClaimLease, CancellationToken.None).ConfigureAwait(false))
+        {
+            return;
+        }
+
+        try
+        {
+            await this.audit.WriteAsync(
+                "operator.approval-desk.decided",
+                decision.ApproverIdentity,
+                decision.Outcome == ApprovalOutcome.Approved ? AuditOutcome.Succeeded : AuditOutcome.Denied,
+                new AuditTarget("approval", decision.ApprovalId),
+                decision.Reason,
+                cancellationToken: CancellationToken.None).ConfigureAwait(false);
+        }
+        catch
+        {
+            await this.store.ReleaseDecisionAuditClaimAsync(decision.ApprovalId, CancellationToken.None).ConfigureAwait(false);
+            throw;
+        }
+
         await this.store.MarkDecisionAuditedAsync(decision.ApprovalId, CancellationToken.None).ConfigureAwait(false);
     }
 

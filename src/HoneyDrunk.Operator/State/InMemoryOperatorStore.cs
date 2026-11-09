@@ -55,11 +55,41 @@ public sealed class InMemoryOperatorStore : IOperatorStore
     }
 
     /// <inheritdoc />
+    public Task<bool> TryClaimDecisionAuditAsync(string approvalId, DateTimeOffset now, DateTimeOffset claimUntil, CancellationToken cancellationToken)
+    {
+        while (this.approvals.TryGetValue(approvalId, out var current)
+            && !current.DecisionAudited
+            && (current.AuditClaimedUntil is null || current.AuditClaimedUntil <= now))
+        {
+            if (this.approvals.TryUpdate(approvalId, current with { AuditClaimedUntil = claimUntil }, current))
+            {
+                return Task.FromResult(true);
+            }
+        }
+
+        return Task.FromResult(false);
+    }
+
+    /// <inheritdoc />
+    public Task ReleaseDecisionAuditClaimAsync(string approvalId, CancellationToken cancellationToken)
+    {
+        while (this.approvals.TryGetValue(approvalId, out var current) && current.AuditClaimedUntil is not null)
+        {
+            if (this.approvals.TryUpdate(approvalId, current with { AuditClaimedUntil = null }, current))
+            {
+                break;
+            }
+        }
+
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
     public Task MarkDecisionAuditedAsync(string approvalId, CancellationToken cancellationToken)
     {
         while (this.approvals.TryGetValue(approvalId, out var current) && !current.DecisionAudited)
         {
-            if (this.approvals.TryUpdate(approvalId, current with { DecisionAudited = true }, current))
+            if (this.approvals.TryUpdate(approvalId, current with { DecisionAudited = true, AuditClaimedUntil = null }, current))
             {
                 break;
             }

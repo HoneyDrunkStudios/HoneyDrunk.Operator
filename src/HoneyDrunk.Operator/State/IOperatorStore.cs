@@ -5,8 +5,8 @@ namespace HoneyDrunk.Operator.State;
 /// <summary>
 /// Where Operator keeps the state that must survive a restart: approvals and their decisions, manual pauses, and
 /// spend per budget window. The InMemory provider is the default; HoneyDrunk.Operator.Data provides a durable one.
-/// Implementations must make <see cref="TryAddApprovalAsync"/>, <see cref="TryUpdateDecisionAsync"/> and
-/// <see cref="AddSpendAsync"/> atomic.
+/// Implementations must make <see cref="TryAddApprovalAsync"/>, <see cref="TryUpdateDecisionAsync"/>,
+/// <see cref="TryClaimDecisionAuditAsync"/> and <see cref="AddSpendAsync"/> atomic.
 /// </summary>
 public interface IOperatorStore
 {
@@ -30,7 +30,25 @@ public interface IOperatorStore
     /// <returns>True when the decision was replaced.</returns>
     Task<bool> TryUpdateDecisionAsync(string approvalId, ApprovalOutcome expected, ApprovalDecision decision, CancellationToken cancellationToken);
 
-    /// <summary>Marks the recorded decision of an approval as audited.</summary>
+    /// <summary>
+    /// Claims the writing of a decision's audit entry until <paramref name="claimUntil"/>, so that of several callers
+    /// only one writes it. Succeeds only while the decision is not audited and no live claim exists: none was taken,
+    /// it was released, or it ended at or before <paramref name="now"/>. Must be atomic.
+    /// </summary>
+    /// <param name="approvalId">The approval id.</param>
+    /// <param name="now">The current time.</param>
+    /// <param name="claimUntil">When the claim lapses if it is neither released nor completed.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>True when this call holds the claim.</returns>
+    Task<bool> TryClaimDecisionAuditAsync(string approvalId, DateTimeOffset now, DateTimeOffset claimUntil, CancellationToken cancellationToken);
+
+    /// <summary>Releases a claim taken by <see cref="TryClaimDecisionAuditAsync"/> after its audit entry failed.</summary>
+    /// <param name="approvalId">The approval id.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>A task.</returns>
+    Task ReleaseDecisionAuditClaimAsync(string approvalId, CancellationToken cancellationToken);
+
+    /// <summary>Marks the recorded decision of an approval as audited and ends any claim on it.</summary>
     /// <param name="approvalId">The approval id.</param>
     /// <param name="cancellationToken">Cancels the call.</param>
     /// <returns>A task.</returns>

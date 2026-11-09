@@ -88,6 +88,32 @@ public abstract class OperatorStoreContract
         Assert.True((await store.GetApprovalAsync("a1", CancellationToken.None))!.DecisionAudited);
     }
 
+    /// <summary>A decision's audit claim is held by one caller until it lapses, is released, or the decision is audited.</summary>
+    /// <returns>A task.</returns>
+    [Fact]
+    public async Task Decision_audit_claim_is_held_by_one_caller()
+    {
+        var store = this.CreateStore();
+        var request = new ApprovalRequest("a1", "agent:a", "tool.x", new Dictionary<string, string>(), "capability/x/1.0.0", Now.AddHours(1), "corr");
+        await store.TryAddApprovalAsync(new StoredApproval(request, new ApprovalDecision("a1", ApprovalOutcome.Pending, string.Empty, Now, null), Now), CancellationToken.None);
+        await store.TryUpdateDecisionAsync("a1", ApprovalOutcome.Pending, new ApprovalDecision("a1", ApprovalOutcome.Approved, "founder", Now, "fine"), CancellationToken.None);
+        var lease = TimeSpan.FromMinutes(1);
+
+        Assert.True(await store.TryClaimDecisionAuditAsync("a1", Now, Now + lease, CancellationToken.None));
+        Assert.False(await store.TryClaimDecisionAuditAsync("a1", Now.AddSeconds(30), Now.AddSeconds(30) + lease, CancellationToken.None));
+        Assert.True(await store.TryClaimDecisionAuditAsync("a1", Now + lease, Now + lease + lease, CancellationToken.None));
+
+        await store.ReleaseDecisionAuditClaimAsync("a1", CancellationToken.None);
+        Assert.True(await store.TryClaimDecisionAuditAsync("a1", Now + lease, Now + lease + lease, CancellationToken.None));
+
+        await store.MarkDecisionAuditedAsync("a1", CancellationToken.None);
+        var audited = await store.GetApprovalAsync("a1", CancellationToken.None);
+        Assert.True(audited!.DecisionAudited);
+        Assert.Null(audited.AuditClaimedUntil);
+        Assert.False(await store.TryClaimDecisionAuditAsync("a1", Now.AddHours(1), Now.AddHours(2), CancellationToken.None));
+        Assert.False(await store.TryClaimDecisionAuditAsync("missing", Now, Now + lease, CancellationToken.None));
+    }
+
     /// <summary>Adding a pause inserts only when none exists, and never replaces one.</summary>
     /// <returns>A task.</returns>
     [Fact]

@@ -28,6 +28,13 @@ internal sealed class OperatorDataStore(ApprovalDataService approvals, PauseData
         this.approvals.TryUpdateDecisionAsync(approvalId, expected, decision, cancellationToken);
 
     /// <inheritdoc />
+    public Task<bool> TryClaimDecisionAuditAsync(string approvalId, DateTimeOffset now, DateTimeOffset claimUntil, CancellationToken cancellationToken) =>
+        this.approvals.TryClaimDecisionAuditAsync(approvalId, now, claimUntil, cancellationToken);
+
+    /// <inheritdoc />
+    public Task ReleaseDecisionAuditClaimAsync(string approvalId, CancellationToken cancellationToken) => this.approvals.ReleaseDecisionAuditClaimAsync(approvalId, cancellationToken);
+
+    /// <inheritdoc />
     public Task MarkDecisionAuditedAsync(string approvalId, CancellationToken cancellationToken) => this.approvals.MarkDecisionAuditedAsync(approvalId, cancellationToken);
 
     /// <inheritdoc />

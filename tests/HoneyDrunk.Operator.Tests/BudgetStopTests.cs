@@ -1,4 +1,6 @@
 using HoneyDrunk.Operator.Abstractions;
+using HoneyDrunk.Vault.Abstractions;
+using NSubstitute;
 using Xunit;
 
 namespace HoneyDrunk.Operator.Tests;
@@ -186,6 +188,21 @@ public sealed class BudgetStopTests
         await Assert.ThrowsAsync<ArgumentException>(() => fixture.CostGuard.RecordAsync(Spend(1m) with { AgentId = longId }));
 
         Assert.Equal(0m, await fixture.Store.GetSpendAsync(longId, Window, CancellationToken.None));
+    }
+
+    /// <summary>A charge is not stored when its budget limit cannot be read, so no spend is left without its stop.</summary>
+    /// <returns>A task.</returns>
+    [Fact]
+    public async Task Charge_is_not_stored_when_the_limit_cannot_be_read()
+    {
+        var config = Substitute.For<IConfigProvider>();
+        config.GetValueAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns<Task<string>>(_ => throw new InvalidOperationException("configuration unavailable"));
+        var fixture = new OperatorFixture(configProvider: config);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.CostGuard.RecordAsync(Spend(10m)));
+
+        Assert.Equal(0m, await fixture.Store.GetSpendAsync(AgentId, Window, CancellationToken.None));
     }
 
     private static CostEvent Spend(decimal amount, string window = Window) =>

@@ -1,7 +1,6 @@
 using HoneyDrunk.Operator.Abstractions;
 using HoneyDrunk.Operator.State;
 using Microsoft.EntityFrameworkCore;
-using System.Text.Json;
 
 namespace HoneyDrunk.Operator.Data;
 
@@ -16,7 +15,7 @@ public sealed class ApprovalDataService(IDbContextFactory<OperatorDbContext> con
     {
         await using var context = await this.contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         var row = await context.Approvals.AsNoTracking().SingleOrDefaultAsync(approval => approval.ApprovalId == approvalId, cancellationToken).ConfigureAwait(false);
-        return row is null ? null : ToStored(row);
+        return row is null ? null : ApprovalRows.ToStored(row);
     }
 
     /// <inheritdoc cref="IOperatorStore.TryAddApprovalAsync" />
@@ -29,7 +28,7 @@ public sealed class ApprovalDataService(IDbContextFactory<OperatorDbContext> con
             return false;
         }
 
-        context.Approvals.Add(ToRow(approval));
+        context.Approvals.Add(ApprovalRows.ToRow(approval));
         try
         {
             await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
@@ -61,13 +60,40 @@ public sealed class ApprovalDataService(IDbContextFactory<OperatorDbContext> con
         return updated == 1;
     }
 
+    /// <inheritdoc cref="IOperatorStore.TryClaimDecisionAuditAsync" />
+    public async Task<bool> TryClaimDecisionAuditAsync(string approvalId, DateTimeOffset now, DateTimeOffset claimUntil, CancellationToken cancellationToken)
+    {
+        await using var context = await this.contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var nowTicks = now.UtcTicks;
+        var untilTicks = claimUntil.UtcTicks;
+        var updated = await context.Approvals
+            .Where(row => row.ApprovalId == approvalId && !row.DecisionAudited && (row.AuditClaimedUntilTicks == null || row.AuditClaimedUntilTicks <= nowTicks))
+            .ExecuteUpdateAsync(setters => setters.SetProperty(row => row.AuditClaimedUntilTicks, untilTicks), cancellationToken)
+            .ConfigureAwait(false);
+        return updated == 1;
+    }
+
+    /// <inheritdoc cref="IOperatorStore.ReleaseDecisionAuditClaimAsync" />
+    public async Task ReleaseDecisionAuditClaimAsync(string approvalId, CancellationToken cancellationToken)
+    {
+        await using var context = await this.contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        await context.Approvals
+            .Where(row => row.ApprovalId == approvalId)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(row => row.AuditClaimedUntilTicks, (long?)null), cancellationToken)
+            .ConfigureAwait(false);
+    }
+
     /// <inheritdoc cref="IOperatorStore.MarkDecisionAuditedAsync" />
     public async Task MarkDecisionAuditedAsync(string approvalId, CancellationToken cancellationToken)
     {
         await using var context = await this.contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         await context.Approvals
             .Where(row => row.ApprovalId == approvalId)
-            .ExecuteUpdateAsync(setters => setters.SetProperty(row => row.DecisionAudited, true), cancellationToken)
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(row => row.DecisionAudited, true)
+                    .SetProperty(row => row.AuditClaimedUntilTicks, (long?)null),
+                cancellationToken)
             .ConfigureAwait(false);
     }
 
@@ -83,34 +109,7 @@ public sealed class ApprovalDataService(IDbContextFactory<OperatorDbContext> con
             .Take(limit)
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
-        return rows.Select(ToStored).ToArray();
-    }
-
-    private static DateTimeOffset FromTicks(long ticks) => new(ticks, TimeSpan.Zero);
-
-    private static ApprovalEntity ToRow(StoredApproval approval) => new()
-    {
-        ApprovalId = approval.Request.ApprovalId,
-        Subject = approval.Request.Subject,
-        Action = approval.Request.Action,
-        ContextJson = JsonSerializer.Serialize(approval.Request.Context),
-        RequestedScope = approval.Request.RequestedScope,
-        ExpiryTicks = approval.Request.Expiry.UtcTicks,
-        RequesterCorrelationId = approval.Request.RequesterCorrelationId,
-        RequestedAtTicks = approval.RequestedAt.UtcTicks,
-        Outcome = (int)approval.Decision.Outcome,
-        ApproverIdentity = approval.Decision.ApproverIdentity,
-        DecidedAtTicks = approval.Decision.DecidedAt.UtcTicks,
-        Reason = approval.Decision.Reason,
-        DecisionAudited = approval.DecisionAudited,
-    };
-
-    private static StoredApproval ToStored(ApprovalEntity row)
-    {
-        var context = JsonSerializer.Deserialize<Dictionary<string, string>>(row.ContextJson) ?? [];
-        var request = new ApprovalRequest(row.ApprovalId, row.Subject, row.Action, context, row.RequestedScope, FromTicks(row.ExpiryTicks), row.RequesterCorrelationId);
-        var decision = new ApprovalDecision(row.ApprovalId, (ApprovalOutcome)row.Outcome, row.ApproverIdentity, FromTicks(row.DecidedAtTicks), row.Reason);
-        return new StoredApproval(request, decision, FromTicks(row.RequestedAtTicks), row.DecisionAudited);
+        return rows.Select(ApprovalRows.ToStored).ToArray();
     }
 
     private bool ApprovalExists(string approvalId)

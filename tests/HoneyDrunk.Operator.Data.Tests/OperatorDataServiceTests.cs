@@ -57,8 +57,8 @@ public sealed class OperatorDataServiceTests : OperatorStoreContract, IDisposabl
     public async Task Total_is_returned_when_cancelled_after_the_update()
     {
         var interceptor = new CancelAfterSpendUpdate();
-        using var database = new SqliteDatabase(interceptor);
-        var store = this.Store(options => options.UseSqlite(database.ConnectionString).AddInterceptors(interceptor));
+        using var interceptedDatabase = new SqliteDatabase(interceptor);
+        var store = this.Store(options => options.UseSqlite(interceptedDatabase.ConnectionString).AddInterceptors(interceptor));
         await store.AddSpendAsync("agent-a", "2026-11", 6m, CancellationToken.None);
 
         var total = await store.AddSpendAsync("agent-a", "2026-11", 4m, interceptor.Cancellation.Token);

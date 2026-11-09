@@ -1,4 +1,5 @@
 using HoneyDrunk.Operator.Abstractions;
+using HoneyDrunk.Operator.Approval;
 using NSubstitute;
 using Xunit;
 
@@ -302,6 +303,48 @@ public sealed class ApprovalDeskTests
         await fixture.Desk.DecideAsync("a1", ApprovalOutcome.Approved, "founder", "fine");
 
         Assert.Single(fixture.AuditLog.Entries, item => item.EventName == "operator.approval-desk.decided");
+    }
+
+    /// <summary>The same decision made while the first one's audit entry is still being written is not audited twice.</summary>
+    /// <returns>A task.</returns>
+    [Fact]
+    public async Task Overlapping_same_decisions_write_one_audit_entry()
+    {
+        var fixture = new OperatorFixture();
+        await fixture.Gate.RequestAsync(fixture.Request());
+        fixture.AuditLog.HoldOn = "operator.approval-desk.decided";
+        var first = fixture.Desk.DecideAsync("a1", ApprovalOutcome.Approved, "founder", "fine");
+        await fixture.AuditLog.Held.Task;
+        fixture.AuditLog.HoldOn = null;
+
+        var second = await fixture.Desk.DecideAsync("a1", ApprovalOutcome.Approved, "founder", "fine");
+        fixture.AuditLog.Release.SetResult();
+        await first;
+
+        Assert.Equal(ApprovalOutcome.Approved, second!.Outcome);
+        Assert.Single(fixture.AuditLog.Entries, item => item.EventName == "operator.approval-desk.decided");
+        Assert.True((await fixture.Store.GetApprovalAsync("a1", CancellationToken.None))!.DecisionAudited);
+    }
+
+    /// <summary>A claim left by a writer that never finished lapses, and the same decision made again writes the entry.</summary>
+    /// <returns>A task.</returns>
+    [Fact]
+    public async Task Lapsed_audit_claim_is_taken_over()
+    {
+        var fixture = new OperatorFixture();
+        await fixture.Gate.RequestAsync(fixture.Request());
+        var now = fixture.Clock.GetUtcNow();
+        await fixture.Store.TryUpdateDecisionAsync("a1", ApprovalOutcome.Pending, new ApprovalDecision("a1", ApprovalOutcome.Approved, "founder", now, "fine"), CancellationToken.None);
+        await fixture.Store.TryClaimDecisionAuditAsync("a1", now, now + DefaultApprovalDesk.AuditClaimLease, CancellationToken.None);
+
+        await fixture.Desk.DecideAsync("a1", ApprovalOutcome.Approved, "founder", "fine");
+        Assert.DoesNotContain(fixture.AuditLog.Entries, item => item.EventName == "operator.approval-desk.decided");
+
+        fixture.Clock.Advance(DefaultApprovalDesk.AuditClaimLease);
+        await fixture.Desk.DecideAsync("a1", ApprovalOutcome.Approved, "founder", "fine");
+
+        Assert.Single(fixture.AuditLog.Entries, item => item.EventName == "operator.approval-desk.decided");
+        Assert.True((await fixture.Store.GetApprovalAsync("a1", CancellationToken.None))!.DecisionAudited);
     }
 
     private static async Task<bool> Attempt(Func<Task<ApprovalDecision?>> decide)

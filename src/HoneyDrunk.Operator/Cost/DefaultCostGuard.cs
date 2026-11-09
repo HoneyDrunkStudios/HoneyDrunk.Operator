@@ -17,9 +17,10 @@ namespace HoneyDrunk.Operator.Cost;
 /// </summary>
 /// <remarks>
 /// When recorded spend for an agent reaches a limit above zero, the agent is paused (<c>agent:{agentId}</c>, by
-/// <c>operator:budget</c>) unless it is already paused. Only a person resumes it; a new window does not. Once the
-/// spend is stored, the stop runs before anything else and ignores the caller's cancellation, so it cannot be
-/// skipped. The budget check and the record stay separate calls, so the stop is enforced on recorded spend; a
+/// <c>operator:budget</c>) unless it is already paused. Only a person resumes it; a new window does not. The limit
+/// is read before the spend is stored, so a configuration failure stores nothing. Once the spend is stored, the stop
+/// runs before anything else and ignores the caller's cancellation, so it cannot be skipped. The budget check and
+/// the record stay separate calls, so the stop is enforced on recorded spend; a
 /// caller that skips the check can overshoot by one charge before the pause takes effect.
 /// </remarks>
 /// <param name="config">The Vault configuration provider.</param>
@@ -94,11 +95,13 @@ public sealed class DefaultCostGuard(
         // Recorded spend is non-negative; a negative amount would let a scope drift back under budget.
         ArgumentOutOfRangeException.ThrowIfNegative(costEvent.Amount);
         using var activity = this.telemetry.Start("cost-guard", "record");
+
+        // The limit is read first: if configuration cannot be read, nothing is stored, and a retry charges only once.
+        var limit = await this.ReadLimitAsync(costEvent.AgentId, costEvent.Window, cancellationToken).ConfigureAwait(false);
         var total = await this.store.AddSpendAsync(costEvent.AgentId, costEvent.Window, costEvent.Amount, cancellationToken).ConfigureAwait(false);
 
         // The spend is stored. From here nothing uses the caller's token, and the stop comes first, so a failure or a
         // cancellation cannot leave spend over the limit without a pause.
-        var limit = await this.ReadLimitAsync(costEvent.AgentId, costEvent.Window, CancellationToken.None).ConfigureAwait(false);
         if (limit > 0m && total >= limit)
         {
             await this.StopAsync(costEvent.AgentId, total, limit, costEvent.Window).ConfigureAwait(false);

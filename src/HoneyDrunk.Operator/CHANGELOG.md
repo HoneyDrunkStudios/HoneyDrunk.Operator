@@ -13,12 +13,14 @@ All notable changes to this package are documented here. The format follows
 - The cost guard pauses an agent once when its monthly spend reaches its budget, never replacing a pause already in place. The stop runs before anything else once the spend is stored and ignores the caller's cancellation.
 - A scope's standing budget, `Budget:{scope}`, applies to every window that has no `Budget:{scope}:{window}` of its own.
 - A pending approval asked for again is announced again, so a failed announcement is not final.
+- A decision's audit entry is written once, by the caller that claims it in the store (`IOperatorStore.TryClaimDecisionAuditAsync`), even when several callers on several hosts make the same decision at once. A failed entry releases its claim, so the same decision made again writes it; a claim whose holder died lapses after one minute.
 - `IOperatorStore` and the in-memory default; audit entries for decisions, pauses, resumes and budget stops.
 
 ### Changed
 
 - Constructors: `DefaultApprovalGate` takes `IOperatorStore`; `DefaultCircuitBreaker` takes `IAgentPauses`; `DefaultCostGuard` takes `IOperatorStore` and `TimeProvider`.
 - `DefaultCostGuard.RecordAsync` refuses an agent id longer than 194 characters, so its pause name fits.
+- `DefaultCostGuard.RecordAsync` reads the budget limit before storing the charge, so a configuration failure stores nothing and a retry charges once.
 - An approval id reused for a different request is refused instead of returning the earlier decision.
 
 ## [0.1.2] - 2026-11-05
