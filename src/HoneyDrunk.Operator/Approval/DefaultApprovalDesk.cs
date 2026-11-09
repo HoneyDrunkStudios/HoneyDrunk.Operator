@@ -75,7 +75,7 @@ public sealed class DefaultApprovalDesk(
         ArgumentOutOfRangeException.ThrowIfGreaterThan(limit, MaxPendingPage);
         using var activity = this.telemetry.Start("approval-desk", "list-pending");
         var pending = await this.store.ListPendingAsync(this.timeProvider.GetUtcNow(), limit, cancellationToken).ConfigureAwait(false);
-        return pending.Select(item => new PendingApproval(item.Request, item.RequestedAt)).ToArray();
+        return [.. pending.Select(item => new PendingApproval(item.Request, item.RequestedAt))];
     }
 
     // An already-settled approval: the same decision again is a no-op, Expired is reported, anything else conflicts.

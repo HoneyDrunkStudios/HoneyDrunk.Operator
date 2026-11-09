@@ -25,8 +25,10 @@ public sealed class SpendDataService(IDbContextFactory<OperatorDbContext> contex
         // A charge that starts is finished: the caller's cancellation is observed only before the transaction, so a
         // cost already incurred is not dropped halfway. The transaction itself keeps or loses the whole charge.
         cancellationToken.ThrowIfCancellationRequested();
-        for (var attempt = 1; ; attempt++)
+        var attempt = 0;
+        while (true)
         {
+            attempt++;
             try
             {
                 return await OperatorUnitOfWork.RunAsync(context, charge.Recorded.Id, token => Charge(context, charge, token), CancellationToken.None).ConfigureAwait(false);

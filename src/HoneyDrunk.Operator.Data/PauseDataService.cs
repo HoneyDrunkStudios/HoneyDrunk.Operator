@@ -26,8 +26,10 @@ public sealed class PauseDataService(IDbContextFactory<OperatorDbContext> contex
         ArgumentNullException.ThrowIfNull(pause);
         ArgumentNullException.ThrowIfNull(audit);
         await using var context = await this.contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-        for (var attempt = 1; ; attempt++)
+        var attempt = 0;
+        while (true)
         {
+            attempt++;
             try
             {
                 await OperatorUnitOfWork.RunAsync(context, audit.Id, token => Set(context, pause, audit, token), cancellationToken).ConfigureAwait(false);

@@ -65,12 +65,14 @@ public sealed class InMemoryOperatorStore : IOperatorStore
     {
         lock (this.sync)
         {
-            IReadOnlyList<StoredApproval> pending = this.approvals.Values
-                .Where(approval => approval.Decision.Outcome == ApprovalOutcome.Pending && approval.Request.Expiry > now)
-                .OrderByDescending(approval => approval.RequestedAt)
-                .ThenBy(approval => approval.Request.ApprovalId, StringComparer.Ordinal)
-                .Take(limit)
-                .ToArray();
+            IReadOnlyList<StoredApproval> pending =
+            [
+                .. this.approvals.Values
+                    .Where(approval => approval.Decision.Outcome == ApprovalOutcome.Pending && approval.Request.Expiry > now)
+                    .OrderByDescending(approval => approval.RequestedAt)
+                    .ThenBy(approval => approval.Request.ApprovalId, StringComparer.Ordinal)
+                    .Take(limit),
+            ];
             return Task.FromResult(pending);
         }
     }

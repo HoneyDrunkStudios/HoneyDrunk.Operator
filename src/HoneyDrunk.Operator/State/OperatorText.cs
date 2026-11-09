@@ -23,7 +23,12 @@ internal static class OperatorText
 
     private static string Check(string value, int maxLength, string paramName)
     {
-        ArgumentNullException.ThrowIfNull(value, paramName);
+        if (value is null)
+        {
+            // The caller's own parameter name is reported, not this helper's.
+            throw new ArgumentNullException(paramName);
+        }
+
         if (string.IsNullOrWhiteSpace(value) || value.Length > maxLength || value.Any(char.IsControl))
         {
             throw new ArgumentException($"The value must be 1 to {maxLength} characters, not blank, with no control characters.", paramName);

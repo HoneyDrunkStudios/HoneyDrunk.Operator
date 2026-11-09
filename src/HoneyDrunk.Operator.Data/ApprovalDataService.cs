@@ -100,7 +100,7 @@ public sealed class ApprovalDataService(IDbContextFactory<OperatorDbContext> con
             .Take(limit)
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
-        return rows.Select(ApprovalRows.ToStored).ToArray();
+        return [.. rows.Select(ApprovalRows.ToStored)];
     }
 
     private bool ApprovalExists(string approvalId)
