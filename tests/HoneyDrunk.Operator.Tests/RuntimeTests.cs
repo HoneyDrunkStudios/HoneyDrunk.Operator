@@ -6,8 +6,12 @@ using HoneyDrunk.Operator.Audit;
 using HoneyDrunk.Operator.Breaker;
 using HoneyDrunk.Operator.Cost;
 using HoneyDrunk.Operator.Events;
+using HoneyDrunk.Operator.Pauses;
 using HoneyDrunk.Operator.Policy;
+using HoneyDrunk.Operator.State;
 using HoneyDrunk.Operator.Telemetry;
+using HoneyDrunk.Vault.Abstractions;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using NSubstitute;
 using Xunit;
@@ -25,7 +29,7 @@ public sealed class RuntimeTests
         {
             ["HoneyDrunk:Operator:Breaker:svc:ResetWindowSeconds"] = "0",
         });
-        var breaker = new DefaultCircuitBreaker(config, Options(), Telemetry(), Audit(), Clock());
+        var breaker = new DefaultCircuitBreaker(config, Options(), Telemetry(), Audit(), Clock(), NoPauses());
 
         Assert.True(await breaker.IsAllowedAsync("svc"));
         Assert.Equal(BreakerState.Closed, await breaker.GetStateAsync("svc"));
@@ -49,7 +53,7 @@ public sealed class RuntimeTests
         {
             ["HoneyDrunk:Operator:Budget:agent:daily"] = "10",
         });
-        var guard = new DefaultCostGuard(config, Options(), Telemetry(), Audit());
+        var guard = Guard(config, Options(), Telemetry());
 
         var first = await guard.CheckBudgetAsync("agent", "daily", 6m);
         Assert.True(first.Allowed);
@@ -98,13 +102,17 @@ public sealed class RuntimeTests
         var sink = Substitute.For<IApprovalEventSink>();
         var emitter = new ApprovalEventEmitter(sink, Telemetry());
         var clock = Clock();
-        var gate = new DefaultApprovalGate(emitter, Telemetry(), Audit(), clock);
+        var gate = Gate(emitter, clock);
 
         var request = new ApprovalRequest("a1", "subject", "deploy", new Dictionary<string, string>(), "scope", clock.GetUtcNow().AddMinutes(5), "corr");
         var decision = await gate.RequestAsync(request);
 
         Assert.Equal(ApprovalOutcome.Pending, decision.Outcome);
-        await sink.Received(1).EmitApprovalNeededAsync(request, Arg.Any<CancellationToken>());
+
+        // The gate announces its own read-only snapshot of the request, so the match is on content.
+        await sink.Received(1).EmitApprovalNeededAsync(
+            Arg.Is<ApprovalRequest>(announced => announced.ApprovalId == "a1" && announced.Subject == "subject" && announced.Action == "deploy" && announced.RequestedScope == "scope" && announced.Expiry == request.Expiry && announced.Context.Count == 0),
+            Arg.Any<CancellationToken>());
 
         var status = await gate.CheckStatusAsync("a1");
         Assert.NotNull(status);
@@ -136,7 +144,7 @@ public sealed class RuntimeTests
     [Fact]
     public async Task CostGuard_rejects_negative_amounts()
     {
-        var guard = new DefaultCostGuard(TestDoubles.ConfigProvider(), Options(), Telemetry(), Audit());
+        var guard = Guard(TestDoubles.ConfigProvider(), Options(), Telemetry());
 
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => guard.CheckBudgetAsync("agent", "daily", -1m));
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
@@ -151,7 +159,7 @@ public sealed class RuntimeTests
         {
             ["HoneyDrunk:Operator:Budget:agent:daily"] = "-5",
         });
-        var guard = new DefaultCostGuard(config, Options(new OperatorOptions { DefaultBudgetLimit = 10m }), Telemetry(), Audit());
+        var guard = Guard(config, Options(new OperatorOptions { DefaultBudgetLimit = 10m }), Telemetry());
 
         // A negative config value must not read as "unlimited"; the default limit (10) still enforces.
         var over = await guard.CheckBudgetAsync("agent", "daily", 12m);
@@ -167,7 +175,7 @@ public sealed class RuntimeTests
     {
         var emitter = new ApprovalEventEmitter(Substitute.For<IApprovalEventSink>(), Telemetry());
         var clock = Clock();
-        var gate = new DefaultApprovalGate(emitter, Telemetry(), Audit(), clock);
+        var gate = Gate(emitter, clock);
 
         var request = new ApprovalRequest("a1", "subject", "deploy", new Dictionary<string, string>(), "scope", clock.GetUtcNow().AddMinutes(5), "corr");
         await gate.RequestAsync(request);
@@ -191,7 +199,7 @@ public sealed class RuntimeTests
             ["HoneyDrunk:Operator:Breaker:svc:ResetWindowSeconds"] = "0",
             ["HoneyDrunk:Operator:Breaker:svc:HalfOpenTrialCount"] = "2",
         });
-        var breaker = new DefaultCircuitBreaker(config, Options(), Telemetry(), Audit(), Clock());
+        var breaker = new DefaultCircuitBreaker(config, Options(), Telemetry(), Audit(), Clock(), NoPauses());
 
         await breaker.TripAsync("svc", "failures");
 
@@ -209,18 +217,28 @@ public sealed class RuntimeTests
 
     private static OperatorAuditWriter Audit() => new(Array.Empty<IAuditLog>());
 
+    private static DefaultAgentPauses NoPauses()
+    {
+        var store = new InMemoryOperatorStore();
+        return new(store, Outbox(store), Telemetry(), TimeProvider.System);
+    }
+
+    private static OperatorAuditOutbox Outbox(IOperatorStore store) => new(store, Audit(), TimeProvider.System, NullLogger<OperatorAuditOutbox>.Instance);
+
+    private static DefaultCostGuard Guard(IConfigProvider config, IOptions<OperatorOptions> options, OperatorTelemetry telemetry)
+    {
+        var store = new InMemoryOperatorStore();
+        return new(config, options, telemetry, Audit(), store, Outbox(store), TimeProvider.System);
+    }
+
+    private static DefaultApprovalGate Gate(ApprovalEventEmitter emitter, TimeProvider clock)
+    {
+        var store = new InMemoryOperatorStore();
+        return new(emitter, Telemetry(), Outbox(store), clock, store);
+    }
+
     private static IOptions<OperatorOptions> Options(OperatorOptions? options = null) =>
         Microsoft.Extensions.Options.Options.Create(options ?? new OperatorOptions());
 
     private static MutableTimeProvider Clock() => new(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
-
-    /// <summary>A <see cref="TimeProvider"/> whose current instant can be advanced by tests.</summary>
-    private sealed class MutableTimeProvider(DateTimeOffset start) : TimeProvider
-    {
-        private DateTimeOffset now = start;
-
-        public override DateTimeOffset GetUtcNow() => this.now;
-
-        public void Advance(TimeSpan delta) => this.now += delta;
-    }
 }

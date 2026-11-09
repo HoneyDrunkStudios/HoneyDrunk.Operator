@@ -19,18 +19,21 @@ namespace HoneyDrunk.Operator.Breaker;
 /// <param name="telemetry">The Operator telemetry helper.</param>
 /// <param name="audit">The Operator audit writer.</param>
 /// <param name="timeProvider">The clock used for reset-window timing (Grid clock policy).</param>
+/// <param name="pauses">Manual pauses; a paused name is refused whatever the breaker state.</param>
 public sealed class DefaultCircuitBreaker(
     IConfigProvider config,
     IOptions<OperatorOptions> options,
     OperatorTelemetry telemetry,
     OperatorAuditWriter audit,
-    TimeProvider timeProvider) : ICircuitBreaker
+    TimeProvider timeProvider,
+    IAgentPauses pauses) : ICircuitBreaker
 {
     private readonly IConfigProvider config = config ?? throw new ArgumentNullException(nameof(config));
     private readonly OperatorOptions options = (options ?? throw new ArgumentNullException(nameof(options))).Value;
     private readonly OperatorTelemetry telemetry = telemetry ?? throw new ArgumentNullException(nameof(telemetry));
     private readonly OperatorAuditWriter audit = audit ?? throw new ArgumentNullException(nameof(audit));
     private readonly TimeProvider timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
+    private readonly IAgentPauses pauses = pauses ?? throw new ArgumentNullException(nameof(pauses));
     private readonly ConcurrentDictionary<string, BreakerEntry> entries = new(StringComparer.Ordinal);
 
     /// <inheritdoc />
@@ -38,6 +41,13 @@ public sealed class DefaultCircuitBreaker(
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(breakerName);
         using var activity = this.telemetry.Start("circuit-breaker", "is-allowed");
+
+        // A manual pause wins over every breaker state, and no reset window lifts it.
+        if (await this.pauses.GetAsync(breakerName, cancellationToken).ConfigureAwait(false) is not null)
+        {
+            return false;
+        }
+
         var entry = this.entries.GetOrAdd(breakerName, static _ => new BreakerEntry());
         var resetWindow = await this.ReadIntAsync($"Breaker:{breakerName}:ResetWindowSeconds", this.options.DefaultBreakerResetWindowSeconds, cancellationToken).ConfigureAwait(false);
         var trialCount = await this.ReadIntAsync($"Breaker:{breakerName}:HalfOpenTrialCount", this.options.DefaultBreakerHalfOpenTrialCount, cancellationToken).ConfigureAwait(false);
@@ -108,14 +118,19 @@ public sealed class DefaultCircuitBreaker(
     }
 
     /// <inheritdoc />
-    public Task<BreakerState> GetStateAsync(string breakerName, CancellationToken cancellationToken = default)
+    public async Task<BreakerState> GetStateAsync(string breakerName, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(breakerName);
         using var activity = this.telemetry.Start("circuit-breaker", "get-state");
+        if (await this.pauses.GetAsync(breakerName, cancellationToken).ConfigureAwait(false) is not null)
+        {
+            return BreakerState.Open;
+        }
+
         var entry = this.entries.GetOrAdd(breakerName, static _ => new BreakerEntry());
         lock (entry.Gate)
         {
-            return Task.FromResult(entry.State);
+            return entry.State;
         }
     }
 

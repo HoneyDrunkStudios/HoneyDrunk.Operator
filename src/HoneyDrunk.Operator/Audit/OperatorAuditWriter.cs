@@ -1,5 +1,6 @@
 using HoneyDrunk.Audit.Abstractions;
 using HoneyDrunk.Kernel.Abstractions.Identity;
+using HoneyDrunk.Operator.State;
 
 namespace HoneyDrunk.Operator.Audit;
 
@@ -35,35 +36,49 @@ public sealed class OperatorAuditWriter(IEnumerable<IAuditLog> auditLogs)
     /// <param name="correlationId">An optional correlation identifier.</param>
     /// <param name="cancellationToken">A token to observe for cancellation.</param>
     /// <returns>A task representing the append across all sinks.</returns>
-    public async Task WriteAsync(
+    public Task WriteAsync(
         string eventName,
         string actor,
         AuditOutcome outcome,
         AuditTarget target,
         string? reason = null,
         string? correlationId = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+
+        // No time is given, so each sink stamps the entry when it appends it.
+        this.AppendAsync(Entry(eventName, actor, outcome, target, reason, correlationId), cancellationToken);
+
+    /// <summary>
+    /// Appends an outbox entry to every registered sink. The entry carries the time its change happened, so one
+    /// delivered late still shows when the approval, pause, resume or budget stop took place.
+    /// </summary>
+    /// <param name="audit">The entry.</param>
+    /// <param name="cancellationToken">A token to observe for cancellation.</param>
+    /// <returns>A task representing the append across all sinks.</returns>
+    public Task WriteAsync(PendingAudit audit, CancellationToken cancellationToken = default)
     {
-        if (this.auditLogs.Count == 0)
-        {
-            return;
-        }
+        ArgumentNullException.ThrowIfNull(audit);
+        var entry = Entry(audit.EventName, audit.Actor, audit.Outcome, new AuditTarget(audit.TargetType, audit.TargetId), audit.Reason, audit.CorrelationId);
+        return this.AppendAsync(entry with { OccurredAt = audit.CreatedAt }, cancellationToken);
+    }
 
-        var entry = new AuditEntry(
-            AuditEntryId.Empty,
-            default,
-            actor,
-            eventName,
-            AuditCategory.SystemAction,
-            outcome,
-            target,
-            TenantId.Internal,
-            correlationId,
-            AuditOperation.None,
-            Changes: null,
-            Metadata: null,
-            Reason: reason);
+    private static AuditEntry Entry(string eventName, string actor, AuditOutcome outcome, AuditTarget target, string? reason, string? correlationId) => new(
+        AuditEntryId.Empty,
+        default,
+        actor,
+        eventName,
+        AuditCategory.SystemAction,
+        outcome,
+        target,
+        TenantId.Internal,
+        correlationId,
+        AuditOperation.None,
+        Changes: null,
+        Metadata: null,
+        Reason: reason);
 
+    private async Task AppendAsync(AuditEntry entry, CancellationToken cancellationToken)
+    {
         foreach (var log in this.auditLogs)
         {
             await log.AppendAsync(entry, cancellationToken).ConfigureAwait(false);

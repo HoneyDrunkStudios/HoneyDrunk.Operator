@@ -1,45 +1,60 @@
 using HoneyDrunk.Audit.Abstractions;
 using HoneyDrunk.Operator.Abstractions;
 using HoneyDrunk.Operator.Audit;
+using HoneyDrunk.Operator.State;
 using HoneyDrunk.Operator.Telemetry;
 using HoneyDrunk.Vault.Abstractions;
 using Microsoft.Extensions.Options;
-using System.Collections.Concurrent;
 using System.Globalization;
 
 namespace HoneyDrunk.Operator.Cost;
 
 /// <summary>
-/// In-process <see cref="ICostGuard"/> accumulator. Per-window budget limits are read from Azure
-/// App Configuration via Vault's <see cref="IConfigProvider"/> per ADR-0018 D6 (invariant 117).
+/// The default <see cref="ICostGuard"/>. Spend is kept per (scope, window) in the <see cref="IOperatorStore"/>, so it
+/// survives a restart when the store is durable. Limits are read from Azure App Configuration via Vault's
+/// <see cref="IConfigProvider"/> per ADR-0018 D6 (invariant 117): <c>Budget:{scope}:{window}</c> for one window,
+/// falling back to <c>Budget:{scope}</c> for every window. A limit of zero means unlimited.
 /// </summary>
 /// <remarks>
-/// Durable persistence of the accumulator (via HoneyDrunk.Data's repository surface per ADR-0018
-/// D12) is deferred to a follow-up packet; v0.1.0 accumulates in process. Budget-exceeded denials
-/// and recorded spend are emitted to the audit substrate. Check-then-record is intentionally split
-/// across <see cref="CheckBudgetAsync"/> and <see cref="RecordAsync"/> per the contract and is not
-/// atomic under concurrent callers in v0.1.0; hard enforcement under contention lands with the
-/// durable (transactional) backing.
+/// When recorded spend for an agent reaches a limit above zero, the agent is paused (<c>agent:{agentId}</c>, by
+/// <c>operator:budget</c>) unless it is already paused. Only a person resumes it; a new window does not. The limit is
+/// read first, then the charge, the pause and their audit entries are saved in one store write: a charge reaching the
+/// limit is never stored without its stop, and a failed write stores nothing, so a retry charges once. The budget
+/// check and the record stay separate calls, so the stop is enforced on recorded spend; a caller that skips the check
+/// can overshoot by one charge before the pause takes effect.
 /// </remarks>
 /// <param name="config">The Vault configuration provider.</param>
 /// <param name="options">Startup fallback options.</param>
 /// <param name="telemetry">The Operator telemetry helper.</param>
-/// <param name="audit">The Operator audit writer.</param>
+/// <param name="audit">Writes the audit entry for a denied budget check, which changes nothing.</param>
+/// <param name="store">Where spend is kept.</param>
+/// <param name="outbox">Delivers the audit entries saved with a charge.</param>
+/// <param name="timeProvider">Stamps the budget stop.</param>
 public sealed class DefaultCostGuard(
     IConfigProvider config,
     IOptions<OperatorOptions> options,
     OperatorTelemetry telemetry,
-    OperatorAuditWriter audit) : ICostGuard
+    OperatorAuditWriter audit,
+    IOperatorStore store,
+    OperatorAuditOutbox outbox,
+    TimeProvider timeProvider) : ICostGuard
 {
+    /// <summary>Who a budget stop is recorded as.</summary>
+    public const string BudgetPausedBy = "operator:budget";
+
+    /// <summary>The reason a budget stop is recorded with.</summary>
+    public const string BudgetPauseReason = "monthly budget reached";
+
+    /// <summary>The longest agent id whose pause name, <c>agent:{agentId}</c>, fits the 200-character limit.</summary>
+    public const int MaxAgentIdLength = 194;
+
     private readonly IConfigProvider config = config ?? throw new ArgumentNullException(nameof(config));
     private readonly OperatorOptions options = (options ?? throw new ArgumentNullException(nameof(options))).Value;
     private readonly OperatorTelemetry telemetry = telemetry ?? throw new ArgumentNullException(nameof(telemetry));
     private readonly OperatorAuditWriter audit = audit ?? throw new ArgumentNullException(nameof(audit));
-
-    // TODO(data): back the accumulator with HoneyDrunk.Data's IRepository / IUnitOfWork for
-    // durability across process restarts per ADR-0018 D12. Tracked as a follow-up packet.
-    // Keyed by the (scope, window) tuple so delimiter-bearing scopes/windows can't collide.
-    private readonly ConcurrentDictionary<(string scope, string window), decimal> spend = new();
+    private readonly IOperatorStore store = store ?? throw new ArgumentNullException(nameof(store));
+    private readonly OperatorAuditOutbox outbox = outbox ?? throw new ArgumentNullException(nameof(outbox));
+    private readonly TimeProvider timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
 
     /// <inheritdoc />
     public async Task<CostCheckResult> CheckBudgetAsync(string scope, string window, decimal amount, CancellationToken cancellationToken = default)
@@ -47,15 +62,12 @@ public sealed class DefaultCostGuard(
         ArgumentException.ThrowIfNullOrWhiteSpace(scope);
         ArgumentException.ThrowIfNullOrWhiteSpace(window);
 
-        // A negative projected charge would reduce accumulated spend and could be used to slip
-        // under a budget; cost is non-negative by contract.
+        // A negative projected charge would reduce accumulated spend and could be used to slip under a budget.
         ArgumentOutOfRangeException.ThrowIfNegative(amount);
         using var activity = this.telemetry.Start("cost-guard", "check-budget");
-
         var limit = await this.ReadLimitAsync(scope, window, cancellationToken).ConfigureAwait(false);
-        var current = this.spend.GetValueOrDefault((scope, window));
+        var current = await this.store.GetSpendAsync(scope, window, cancellationToken).ConfigureAwait(false);
         var projected = current + amount;
-
         if (limit > 0m && projected > limit)
         {
             await this.audit.WriteAsync(
@@ -75,21 +87,35 @@ public sealed class DefaultCostGuard(
     public async Task RecordAsync(CostEvent costEvent, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(costEvent);
+        ArgumentException.ThrowIfNullOrWhiteSpace(costEvent.AgentId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(costEvent.Window);
+        if (costEvent.AgentId.Length > MaxAgentIdLength)
+        {
+            // Refused before any spend is stored, so the stop can always write its pause.
+            throw new ArgumentException($"Agent id must be at most {MaxAgentIdLength} characters.", nameof(costEvent));
+        }
 
-        // Recorded spend is non-negative; a negative amount would subtract from the accumulator
-        // and let a scope drift back under budget.
+        // Recorded spend is non-negative; a negative amount would let a scope drift back under budget.
         ArgumentOutOfRangeException.ThrowIfNegative(costEvent.Amount);
         using var activity = this.telemetry.Start("cost-guard", "record");
-        this.spend.AddOrUpdate((scope: costEvent.AgentId, window: costEvent.Window), costEvent.Amount, (_, existing) => existing + costEvent.Amount);
 
-        await this.audit.WriteAsync(
+        // The limit is read first: if configuration cannot be read, nothing is stored.
+        var limit = await this.ReadLimitAsync(costEvent.AgentId, costEvent.Window, cancellationToken).ConfigureAwait(false);
+        var now = this.timeProvider.GetUtcNow();
+        var target = new AuditTarget("cost-scope", costEvent.AgentId);
+        var recorded = PendingAudit.Create(
             "operator.cost-guard.recorded",
             costEvent.AgentId,
             AuditOutcome.Succeeded,
-            new AuditTarget("cost-scope", costEvent.AgentId),
+            target,
             $"Recorded {costEvent.Amount} {costEvent.Unit} from {costEvent.Source}.",
             costEvent.OperationCorrelationId,
-            cancellationToken).ConfigureAwait(false);
+            now);
+        var charge = new SpendCharge(costEvent.AgentId, costEvent.Window, costEvent.Amount, recorded, limit > 0m ? Stop(costEvent, limit, now) : null);
+
+        // One write: the charge, and the stop when it reaches the limit. Delivery ignores the caller's cancellation.
+        await this.store.AddSpendAsync(charge, cancellationToken).ConfigureAwait(false);
+        await this.outbox.DeliverAsync(CancellationToken.None).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -99,21 +125,44 @@ public sealed class DefaultCostGuard(
         ArgumentException.ThrowIfNullOrWhiteSpace(window);
         using var activity = this.telemetry.Start("cost-guard", "get-status");
         var limit = await this.ReadLimitAsync(scope, window, cancellationToken).ConfigureAwait(false);
-        var current = this.spend.GetValueOrDefault((scope, window));
+        var current = await this.store.GetSpendAsync(scope, window, cancellationToken).ConfigureAwait(false);
         return new CostStatus(current, limit, limit > 0m ? Math.Max(0m, limit - current) : decimal.MaxValue, window);
+    }
+
+    // A negative configured limit would read as unlimited and silently disable enforcement, so it is not a limit.
+    private static bool TryParseLimit(string? raw, out decimal value) =>
+        decimal.TryParse(raw, NumberStyles.Number, CultureInfo.InvariantCulture, out value) && value >= 0m;
+
+    private static BudgetStop Stop(CostEvent costEvent, decimal limit, DateTimeOffset now)
+    {
+        var name = "agent:" + costEvent.AgentId;
+        return new BudgetStop(
+            limit,
+            new PauseState(name, BudgetPausedBy, BudgetPauseReason, now),
+            [
+                PendingAudit.Create("operator.pauses.paused", BudgetPausedBy, AuditOutcome.Succeeded, new AuditTarget("pause", name), BudgetPauseReason, null, now),
+                PendingAudit.Create(
+                    "operator.cost-guard.budget-stop",
+                    costEvent.AgentId,
+                    AuditOutcome.Denied,
+                    new AuditTarget("cost-scope", costEvent.AgentId),
+                    $"Spend reached limit {limit} for window {costEvent.Window}; the agent is paused.",
+                    costEvent.OperationCorrelationId,
+                    now),
+            ]);
     }
 
     private async Task<decimal> ReadLimitAsync(string scope, string window, CancellationToken cancellationToken)
     {
-        var raw = await this.config.GetValueAsync(
-            $"{this.options.ConfigKeyPrefix}:Budget:{scope}:{window}",
-            this.options.DefaultBudgetLimit.ToString(CultureInfo.InvariantCulture),
-            cancellationToken).ConfigureAwait(false);
+        // A window's own limit wins; without one, the scope's standing limit applies, so a new window never starts
+        // without a budget.
+        var forWindow = await this.config.GetValueAsync($"{this.options.ConfigKeyPrefix}:Budget:{scope}:{window}", string.Empty, cancellationToken).ConfigureAwait(false);
+        if (TryParseLimit(forWindow, out var value))
+        {
+            return value;
+        }
 
-        // A negative configured limit would read as "unlimited" (limit > 0 is false) and silently
-        // disable enforcement, so reject it and fall back to the configured default.
-        return decimal.TryParse(raw, NumberStyles.Number, CultureInfo.InvariantCulture, out var value) && value >= 0m
-            ? value
-            : this.options.DefaultBudgetLimit;
+        var forScope = await this.config.GetValueAsync($"{this.options.ConfigKeyPrefix}:Budget:{scope}", string.Empty, cancellationToken).ConfigureAwait(false);
+        return TryParseLimit(forScope, out value) ? value : this.options.DefaultBudgetLimit;
     }
 }

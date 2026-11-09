@@ -28,4 +28,10 @@ public sealed class OperatorOptions
 
     /// <summary>Gets or sets the fallback per-window budget limit when config is absent.</summary>
     public decimal DefaultBudgetLimit { get; set; } = 0m;
+
+    /// <summary>
+    /// Gets or sets how often, in seconds, the background delivery retries audit entries still in the store's outbox.
+    /// Entries are first delivered right after the change that saved them; this catches those whose delivery failed.
+    /// </summary>
+    public int AuditDeliveryIntervalSeconds { get; set; } = 30;
 }

@@ -45,10 +45,44 @@ public sealed class InMemoryApprovalGate(TimeProvider? timeProvider = null) : IA
         return Task.FromResult(decision);
     }
 
+    /// <summary>
+    /// Records a decision for a request this gate has received, as a person at the approval desk would.
+    /// </summary>
+    /// <param name="approvalId">The approval id.</param>
+    /// <param name="outcome">The outcome to record.</param>
+    /// <param name="approver">Who decided.</param>
+    /// <param name="reason">Why.</param>
+    /// <returns>The recorded decision, or <see langword="null"/> when the id is unknown.</returns>
+    public ApprovalDecision? Decide(string approvalId, ApprovalOutcome outcome, string approver = "in-memory", string? reason = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(approvalId);
+        if (!this.decisions.ContainsKey(approvalId))
+        {
+            return null;
+        }
+
+        var decision = new ApprovalDecision(approvalId, outcome, approver, this.timeProvider.GetUtcNow(), reason);
+        this.decisions[approvalId] = decision;
+        return decision;
+    }
+
     /// <inheritdoc />
     public Task<ApprovalDecision?> CheckStatusAsync(string approvalId, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(approvalId);
         return Task.FromResult(this.decisions.TryGetValue(approvalId, out var decision) ? decision : null);
+    }
+
+    /// <summary>Lists the received requests whose current decision is still pending, newest first.</summary>
+    /// <returns>The pending requests with the time each was recorded.</returns>
+    internal IReadOnlyList<PendingApproval> Pending()
+    {
+        var requests = this.ReceivedRequests;
+        var pending = requests
+            .Where(request => this.decisions.TryGetValue(request.ApprovalId, out var decision) && decision.Outcome == ApprovalOutcome.Pending)
+            .DistinctBy(request => request.ApprovalId, StringComparer.Ordinal)
+            .Select(request => new PendingApproval(request, this.decisions[request.ApprovalId].DecidedAt))
+            .Reverse();
+        return [.. pending];
     }
 }

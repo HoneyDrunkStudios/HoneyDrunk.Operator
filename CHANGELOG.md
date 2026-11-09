@@ -1,5 +1,13 @@
 # Changelog — HoneyDrunk.Operator
 
+## [0.2.0] - 2026-11-08
+
+### Added
+
+- Approval desk, manual pauses and the monthly budget stop, with audit entries.
+- `HoneyDrunk.Operator.Data`: durable storage for approvals, decisions, pauses and spend.
+- In-memory desk and pauses in `HoneyDrunk.Operator.Testing`.
+
 ## [0.1.2] - 2026-11-05
 
 ### Changed

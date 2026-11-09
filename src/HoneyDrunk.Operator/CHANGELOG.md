@@ -4,6 +4,26 @@ All notable changes to this package are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-11-08
+
+### Added
+
+- `DefaultApprovalDesk` records a person's approve or deny once, by compare-and-set, and lists pending requests. The decision is dated after the request is read, and the store refuses an approve or deny dated after the request's expiry in the same conditional write, so a slow read cannot approve an expired request.
+- `DefaultAgentPauses` pauses and resumes named breakers; pauses override every breaker state.
+- The cost guard pauses an agent once when its monthly spend reaches its budget, never replacing a pause already in place. The charge, the pause and their audit entries are saved in one store write, so a charge reaching the limit is never stored without its stop.
+- A scope's standing budget, `Budget:{scope}`, applies to every window that has no `Budget:{scope}:{window}` of its own.
+- A pending approval asked for again is announced again, so a failed announcement is not final.
+- `IOperatorStore` and the in-memory default.
+- An audit outbox. Every request, decision, expiry, pause, resume, charge and budget stop is saved with its audit entry in one store write, and `OperatorAuditOutbox` delivers the entries to the audit sinks, oldest first, right after the change. Each entry is claimed for one minute, so hosts sharing a store deliver it once. A failing sink no longer fails the change: the entry stays in the outbox and `OperatorAuditDeliveryService`, a hosted service, retries it every `AuditDeliveryIntervalSeconds` (30 by default). Delivery is at least once, and a delivered entry carries the time its change happened, however late it arrives. An entry the sink refuses does not hold back the ones after it; a pass stops after three failures in a row. Audit text longer than the outbox columns (reason 2000, correlation id 200 characters) is cut to fit, never refused.
+
+### Changed
+
+- Constructors: `DefaultApprovalGate` takes `IOperatorStore` and `OperatorAuditOutbox` in place of `OperatorAuditWriter`; `DefaultCircuitBreaker` takes `IAgentPauses`; `DefaultCostGuard` takes `IOperatorStore`, `OperatorAuditOutbox` and `TimeProvider`.
+- `AddHoneyDrunkOperator` also registers logging, `OperatorAuditOutbox` and the `OperatorAuditDeliveryService` hosted service.
+- `DefaultCostGuard.RecordAsync` refuses an agent id longer than 194 characters, so its pause name fits.
+- `DefaultCostGuard.RecordAsync` reads the budget limit before storing the charge, so a configuration failure stores nothing and a retry charges once.
+- An approval id reused for a different request is refused instead of returning the earlier decision. The gate takes a read-only snapshot of each request before it stores, compares or announces it, and compares context keys exactly, so neither a later edit to the caller's dictionary nor a case-insensitive dictionary can make a different request inherit an approval.
+
 ## [0.1.2] - 2026-11-05
 
 ### Changed

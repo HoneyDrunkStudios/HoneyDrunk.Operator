@@ -30,7 +30,8 @@ Plus `OperatorTelemetry` (Kernel `ITelemetryActivityFactory`), `OperatorAuditWri
   policies, and safety-filter config resolve from Azure App Configuration (ADR-0018 D6 / invariant 117).
 - **Kernel** — register an `ITelemetryActivityFactory` (ADR-0018 D7).
 - **Audit** — register an `IAuditLog` from `HoneyDrunk.Audit` to capture decisions (ADR-0030 / ADR-0031).
-  When absent, audit emission is a no-op (graceful degradation).
+  When absent, audit emission is a no-op (graceful degradation). Entries for changes wait in the store's outbox
+  until delivered; run the host as an `IHost` so `OperatorAuditDeliveryService` retries any that failed.
 - **Approval transport** — register an `IApprovalEventSink` to deliver approval-needed events; the
   default is a no-op sink. The wire shape is deferred per ADR-0018 D8.
 
@@ -42,6 +43,6 @@ Plus `OperatorTelemetry` (Kernel `ITelemetryActivityFactory`), `OperatorAuditWri
   `HoneyDrunk.Vault.Abstractions`) is consumed from the `HoneyDrunk.Vault` package — the contract
   type only; no Vault runtime services are composed here.
 - **v0.1.0 deferrals:** the `AuthBackedDecisionPolicy` → HoneyDrunk.Auth delegation (ADR-0018 D5) and
-  durable persistence of cost/approval state (HoneyDrunk.Data, ADR-0018 D12) are marked with
-  `TODO(auth)` / `TODO(data)` and land in follow-up packets. The v0.1.0 defaults are config-sourced
-  and in-process so the substrate is composable and testable from the first release.
+  durable persistence of cost/approval state (HoneyDrunk.Data, ADR-0018 D12) were deferred from v0.1.0.
+  Since 0.2.0, state lives behind `IOperatorStore`: in memory by default, or durable with
+  `HoneyDrunk.Operator.Data`. The Auth delegation is still marked `TODO(auth)`.

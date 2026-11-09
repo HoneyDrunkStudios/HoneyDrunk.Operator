@@ -4,8 +4,10 @@ using HoneyDrunk.Operator.Audit;
 using HoneyDrunk.Operator.Breaker;
 using HoneyDrunk.Operator.Cost;
 using HoneyDrunk.Operator.Events;
+using HoneyDrunk.Operator.Pauses;
 using HoneyDrunk.Operator.Policy;
 using HoneyDrunk.Operator.Safety;
+using HoneyDrunk.Operator.State;
 using HoneyDrunk.Operator.Telemetry;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -22,7 +24,7 @@ public static class ServiceCollectionExtensions
     /// </summary>
     /// <remarks>
     /// Registers the five Operator-owned contracts plus the telemetry, audit, and approval event-out
-    /// helpers. The host is responsible for composing Kernel telemetry, Vault configuration, and
+    /// helpers, and a hosted service that retries audit entries left in the store's outbox. The host is responsible for composing Kernel telemetry, Vault configuration, and
     /// (optionally) the Audit Node — when no <c>IAuditLog</c> is registered, audit emission is a no-op.
     /// </remarks>
     /// <param name="services">The service collection.</param>
@@ -43,10 +45,16 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton(TimeProvider.System);
 
         services.AddSingleton<OperatorTelemetry>();
+        services.AddLogging();
         services.AddSingleton<OperatorAuditWriter>();
+        services.AddSingleton<OperatorAuditOutbox>();
+        services.AddHostedService<OperatorAuditDeliveryService>();
         services.TryAddApprovalSink();
         services.AddSingleton<ApprovalEventEmitter>();
 
+        services.TryAddSingleton<IOperatorStore, InMemoryOperatorStore>();
+        services.AddSingleton<IAgentPauses, DefaultAgentPauses>();
+        services.AddSingleton<IApprovalDesk, DefaultApprovalDesk>();
         services.AddSingleton<IApprovalGate, DefaultApprovalGate>();
         services.AddSingleton<ICircuitBreaker, DefaultCircuitBreaker>();
         services.AddSingleton<ICostGuard, DefaultCostGuard>();
