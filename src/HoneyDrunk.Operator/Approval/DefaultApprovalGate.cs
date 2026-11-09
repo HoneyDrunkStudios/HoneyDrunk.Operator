@@ -36,7 +36,7 @@ public sealed class DefaultApprovalGate(
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.ApprovalId);
-        ArgumentNullException.ThrowIfNull(request.Context, nameof(request));
+        ArgumentNullException.ThrowIfNull(request.Context);
 
         // One read-only snapshot, taken before any await, is what is stored, compared and announced. The caller's
         // dictionary can change afterwards without changing the request a person is asked to decide.
