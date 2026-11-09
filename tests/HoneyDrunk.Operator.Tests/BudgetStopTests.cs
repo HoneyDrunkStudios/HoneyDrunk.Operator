@@ -1,4 +1,5 @@
 using HoneyDrunk.Operator.Abstractions;
+using HoneyDrunk.Operator.Audit;
 using HoneyDrunk.Vault.Abstractions;
 using NSubstitute;
 using Xunit;
@@ -102,17 +103,25 @@ public sealed class BudgetStopTests
         Assert.Equal(3m, check.Remaining);
     }
 
-    /// <summary>A failing audit after the spend is stored never skips the stop.</summary>
+    /// <summary>A failing audit sink never skips the stop or fails the charge; the entries are delivered later.</summary>
     /// <returns>A task.</returns>
     [Fact]
-    public async Task Stop_survives_a_failing_recorded_audit()
+    public async Task Stop_survives_a_failing_audit_sink()
     {
         var fixture = new OperatorFixture(config: TenDollarLimit);
         fixture.AuditLog.ThrowOn = "operator.cost-guard.recorded";
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.CostGuard.RecordAsync(Spend(10m)));
-
+        await fixture.CostGuard.RecordAsync(Spend(10m));
         Assert.NotNull(await fixture.Pauses.GetAsync("agent:" + AgentId));
+        Assert.Equal(["operator.pauses.paused", "operator.cost-guard.budget-stop"], fixture.AuditLog.Entries.Select(entry => entry.EventName));
+
+        fixture.AuditLog.ThrowOn = null;
+        fixture.Clock.Advance(OperatorAuditOutbox.ClaimLease);
+        await fixture.Outbox.DeliverAsync();
+
+        Assert.Equal(
+            ["operator.pauses.paused", "operator.cost-guard.budget-stop", "operator.cost-guard.recorded"],
+            fixture.AuditLog.Entries.Select(entry => entry.EventName));
     }
 
     /// <summary>Once the spend is stored, the stop and its audit do not depend on the caller's token.</summary>
@@ -161,13 +170,13 @@ public sealed class BudgetStopTests
         Assert.NotNull(await fixture.Pauses.GetAsync("agent:" + AgentId));
     }
 
-    /// <summary>A person's pause made while the stop is deciding is never overwritten, and no stop is recorded.</summary>
+    /// <summary>A person's pause is never overwritten by the budget stop, and no stop is recorded.</summary>
     /// <returns>A task.</returns>
     [Fact]
     public async Task Budget_stop_never_overwrites_a_person_pause()
     {
-        var store = new InterleavingStore(new State.InMemoryOperatorStore(), new PauseState("agent:" + AgentId, "founder", "checking", DateTimeOffset.UnixEpoch));
-        var fixture = new OperatorFixture(store, TenDollarLimit);
+        var fixture = new OperatorFixture(config: TenDollarLimit);
+        await fixture.Pauses.PauseAsync("agent:" + AgentId, "founder", "checking");
 
         await fixture.CostGuard.RecordAsync(Spend(10m));
 

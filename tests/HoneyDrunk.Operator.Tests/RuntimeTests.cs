@@ -10,6 +10,8 @@ using HoneyDrunk.Operator.Pauses;
 using HoneyDrunk.Operator.Policy;
 using HoneyDrunk.Operator.State;
 using HoneyDrunk.Operator.Telemetry;
+using HoneyDrunk.Vault.Abstractions;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using NSubstitute;
 using Xunit;
@@ -51,7 +53,7 @@ public sealed class RuntimeTests
         {
             ["HoneyDrunk:Operator:Budget:agent:daily"] = "10",
         });
-        var guard = new DefaultCostGuard(config, Options(), Telemetry(), Audit(), new InMemoryOperatorStore(), TimeProvider.System);
+        var guard = Guard(config, Options(), Telemetry());
 
         var first = await guard.CheckBudgetAsync("agent", "daily", 6m);
         Assert.True(first.Allowed);
@@ -100,7 +102,7 @@ public sealed class RuntimeTests
         var sink = Substitute.For<IApprovalEventSink>();
         var emitter = new ApprovalEventEmitter(sink, Telemetry());
         var clock = Clock();
-        var gate = new DefaultApprovalGate(emitter, Telemetry(), Audit(), clock, new InMemoryOperatorStore());
+        var gate = Gate(emitter, clock);
 
         var request = new ApprovalRequest("a1", "subject", "deploy", new Dictionary<string, string>(), "scope", clock.GetUtcNow().AddMinutes(5), "corr");
         var decision = await gate.RequestAsync(request);
@@ -138,7 +140,7 @@ public sealed class RuntimeTests
     [Fact]
     public async Task CostGuard_rejects_negative_amounts()
     {
-        var guard = new DefaultCostGuard(TestDoubles.ConfigProvider(), Options(), Telemetry(), Audit(), new InMemoryOperatorStore(), TimeProvider.System);
+        var guard = Guard(TestDoubles.ConfigProvider(), Options(), Telemetry());
 
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => guard.CheckBudgetAsync("agent", "daily", -1m));
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
@@ -153,7 +155,7 @@ public sealed class RuntimeTests
         {
             ["HoneyDrunk:Operator:Budget:agent:daily"] = "-5",
         });
-        var guard = new DefaultCostGuard(config, Options(new OperatorOptions { DefaultBudgetLimit = 10m }), Telemetry(), Audit(), new InMemoryOperatorStore(), TimeProvider.System);
+        var guard = Guard(config, Options(new OperatorOptions { DefaultBudgetLimit = 10m }), Telemetry());
 
         // A negative config value must not read as "unlimited"; the default limit (10) still enforces.
         var over = await guard.CheckBudgetAsync("agent", "daily", 12m);
@@ -169,7 +171,7 @@ public sealed class RuntimeTests
     {
         var emitter = new ApprovalEventEmitter(Substitute.For<IApprovalEventSink>(), Telemetry());
         var clock = Clock();
-        var gate = new DefaultApprovalGate(emitter, Telemetry(), Audit(), clock, new InMemoryOperatorStore());
+        var gate = Gate(emitter, clock);
 
         var request = new ApprovalRequest("a1", "subject", "deploy", new Dictionary<string, string>(), "scope", clock.GetUtcNow().AddMinutes(5), "corr");
         await gate.RequestAsync(request);
@@ -211,7 +213,25 @@ public sealed class RuntimeTests
 
     private static OperatorAuditWriter Audit() => new(Array.Empty<IAuditLog>());
 
-    private static DefaultAgentPauses NoPauses() => new(new InMemoryOperatorStore(), Audit(), Telemetry(), TimeProvider.System);
+    private static DefaultAgentPauses NoPauses()
+    {
+        var store = new InMemoryOperatorStore();
+        return new(store, Outbox(store), Telemetry(), TimeProvider.System);
+    }
+
+    private static OperatorAuditOutbox Outbox(IOperatorStore store) => new(store, Audit(), TimeProvider.System, NullLogger<OperatorAuditOutbox>.Instance);
+
+    private static DefaultCostGuard Guard(IConfigProvider config, IOptions<OperatorOptions> options, OperatorTelemetry telemetry)
+    {
+        var store = new InMemoryOperatorStore();
+        return new(config, options, telemetry, Audit(), store, Outbox(store), TimeProvider.System);
+    }
+
+    private static DefaultApprovalGate Gate(ApprovalEventEmitter emitter, TimeProvider clock)
+    {
+        var store = new InMemoryOperatorStore();
+        return new(emitter, Telemetry(), Outbox(store), clock, store);
+    }
 
     private static IOptions<OperatorOptions> Options(OperatorOptions? options = null) =>
         Microsoft.Extensions.Options.Options.Create(options ?? new OperatorOptions());

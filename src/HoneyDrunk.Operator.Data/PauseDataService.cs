@@ -4,10 +4,12 @@ using Microsoft.EntityFrameworkCore;
 
 namespace HoneyDrunk.Operator.Data;
 
-/// <summary>Reads and writes manual pauses. Each call uses its own context from the factory.</summary>
+/// <summary>Reads and writes manual pauses, each write with its outbox entry in one transaction. Each call uses its own context from the factory.</summary>
 /// <param name="contexts">Creates a context per call.</param>
 public sealed class PauseDataService(IDbContextFactory<OperatorDbContext> contexts)
 {
+    private const int MaxAttempts = 3;
+
     private readonly IDbContextFactory<OperatorDbContext> contexts = contexts ?? throw new ArgumentNullException(nameof(contexts));
 
     /// <inheritdoc cref="IOperatorStore.GetPauseAsync" />
@@ -15,14 +17,53 @@ public sealed class PauseDataService(IDbContextFactory<OperatorDbContext> contex
     {
         await using var context = await this.contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         var row = await context.Pauses.AsNoTracking().SingleOrDefaultAsync(pause => pause.Name == name, cancellationToken).ConfigureAwait(false);
-        return row is null ? null : new PauseState(row.Name, row.PausedBy, row.Reason, FromTicks(row.SinceTicks));
+        return row is null ? null : new PauseState(row.Name, row.PausedBy, row.Reason, new DateTimeOffset(row.SinceTicks, TimeSpan.Zero));
     }
 
     /// <inheritdoc cref="IOperatorStore.SetPauseAsync" />
-    public async Task SetPauseAsync(PauseState pause, CancellationToken cancellationToken)
+    public async Task SetPauseAsync(PauseState pause, PendingAudit audit, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(pause);
+        ArgumentNullException.ThrowIfNull(audit);
         await using var context = await this.contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                await OperatorUnitOfWork.RunAsync(context, audit.Id, token => Set(context, pause, audit, token), cancellationToken).ConfigureAwait(false);
+                return;
+            }
+            catch (DbUpdateException) when (attempt < MaxAttempts && this.PauseExists(pause.Name))
+            {
+                // Another host inserted the same pause first; the next attempt updates it instead.
+            }
+        }
+    }
+
+    /// <inheritdoc cref="IOperatorStore.RemovePauseAsync" />
+    public async Task<bool> RemovePauseAsync(string name, PendingAudit audit, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(audit);
+        await using var context = await this.contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        return await OperatorUnitOfWork.RunAsync(
+            context,
+            audit.Id,
+            async token =>
+            {
+                if (await context.Pauses.Where(row => row.Name == name).ExecuteDeleteAsync(token).ConfigureAwait(false) == 0)
+                {
+                    return false;
+                }
+
+                context.PendingAudits.Add(PendingAuditRows.ToRow(audit));
+                await context.SaveChangesAsync(token).ConfigureAwait(false);
+                return true;
+            },
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<bool> Set(OperatorDbContext context, PauseState pause, PendingAudit audit, CancellationToken cancellationToken)
+    {
         var updated = await context.Pauses
             .Where(row => row.Name == pause.Name)
             .ExecuteUpdateAsync(
@@ -32,54 +73,15 @@ public sealed class PauseDataService(IDbContextFactory<OperatorDbContext> contex
                     .SetProperty(row => row.SinceTicks, pause.Since.UtcTicks),
                 cancellationToken)
             .ConfigureAwait(false);
-        if (updated == 1)
+        if (updated == 0)
         {
-            return;
+            context.Pauses.Add(new PauseEntity { Name = pause.Name, PausedBy = pause.PausedBy, Reason = pause.Reason, SinceTicks = pause.Since.UtcTicks });
         }
 
-        context.Pauses.Add(new PauseEntity { Name = pause.Name, PausedBy = pause.PausedBy, Reason = pause.Reason, SinceTicks = pause.Since.UtcTicks });
-        try
-        {
-            await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-        }
-        catch (DbUpdateException) when (this.PauseExists(pause.Name))
-        {
-            // Another host paused it first; a pause is in place either way. Any other failure propagates: a pause
-            // that was never written must not look like one that was.
-        }
+        context.PendingAudits.Add(PendingAuditRows.ToRow(audit));
+        await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        return true;
     }
-
-    /// <inheritdoc cref="IOperatorStore.TryAddPauseAsync" />
-    public async Task<bool> TryAddPauseAsync(PauseState pause, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(pause);
-        await using var context = await this.contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-        if (await context.Pauses.AnyAsync(row => row.Name == pause.Name, cancellationToken).ConfigureAwait(false))
-        {
-            return false;
-        }
-
-        context.Pauses.Add(new PauseEntity { Name = pause.Name, PausedBy = pause.PausedBy, Reason = pause.Reason, SinceTicks = pause.Since.UtcTicks });
-        try
-        {
-            await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-            return true;
-        }
-        catch (DbUpdateException) when (this.PauseExists(pause.Name))
-        {
-            // Another host paused it between the check and the insert; that pause stands.
-            return false;
-        }
-    }
-
-    /// <inheritdoc cref="IOperatorStore.RemovePauseAsync" />
-    public async Task<bool> RemovePauseAsync(string name, CancellationToken cancellationToken)
-    {
-        await using var context = await this.contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-        return await context.Pauses.Where(row => row.Name == name).ExecuteDeleteAsync(cancellationToken).ConfigureAwait(false) > 0;
-    }
-
-    private static DateTimeOffset FromTicks(long ticks) => new(ticks, TimeSpan.Zero);
 
     private bool PauseExists(string name)
     {

@@ -23,8 +23,6 @@ internal static class ApprovalRows
         ApproverIdentity = approval.Decision.ApproverIdentity,
         DecidedAtTicks = approval.Decision.DecidedAt.UtcTicks,
         Reason = approval.Decision.Reason,
-        DecisionAudited = approval.DecisionAudited,
-        AuditClaimedUntilTicks = approval.AuditClaimedUntil?.UtcTicks,
     };
 
     internal static StoredApproval ToStored(ApprovalEntity row)
@@ -32,7 +30,6 @@ internal static class ApprovalRows
         var context = JsonSerializer.Deserialize<Dictionary<string, string>>(row.ContextJson) ?? [];
         var request = new ApprovalRequest(row.ApprovalId, row.Subject, row.Action, context, row.RequestedScope, FromTicks(row.ExpiryTicks), row.RequesterCorrelationId);
         var decision = new ApprovalDecision(row.ApprovalId, (ApprovalOutcome)row.Outcome, row.ApproverIdentity, FromTicks(row.DecidedAtTicks), row.Reason);
-        var claimedUntil = row.AuditClaimedUntilTicks is { } ticks ? FromTicks(ticks) : (DateTimeOffset?)null;
-        return new StoredApproval(request, decision, FromTicks(row.RequestedAtTicks), row.DecisionAudited, claimedUntil);
+        return new StoredApproval(request, decision, FromTicks(row.RequestedAtTicks));
     }
 }

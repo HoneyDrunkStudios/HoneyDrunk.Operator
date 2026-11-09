@@ -9,6 +9,7 @@ using HoneyDrunk.Operator.Pauses;
 using HoneyDrunk.Operator.State;
 using HoneyDrunk.Operator.Telemetry;
 using HoneyDrunk.Vault.Abstractions;
+using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 
 namespace HoneyDrunk.Operator.Tests;
@@ -21,13 +22,14 @@ internal sealed class OperatorFixture
         this.Store = store ?? new InMemoryOperatorStore();
         var telemetry = new OperatorTelemetry(Substitute.For<ITelemetryActivityFactory>());
         var audit = new OperatorAuditWriter([this.AuditLog]);
+        this.Outbox = new OperatorAuditOutbox(this.Store, audit, this.Clock, NullLogger<OperatorAuditOutbox>.Instance);
         var options = Microsoft.Extensions.Options.Options.Create(new OperatorOptions());
         configProvider ??= TestDoubles.ConfigProvider(config);
-        this.Gate = new DefaultApprovalGate(new ApprovalEventEmitter(this.Sink, telemetry), telemetry, audit, this.Clock, this.Store);
-        this.Desk = new DefaultApprovalDesk(this.Store, audit, telemetry, this.Clock);
-        this.Pauses = new DefaultAgentPauses(this.Store, audit, telemetry, this.Clock);
+        this.Gate = new DefaultApprovalGate(new ApprovalEventEmitter(this.Sink, telemetry), telemetry, this.Outbox, this.Clock, this.Store);
+        this.Desk = new DefaultApprovalDesk(this.Store, this.Outbox, telemetry, this.Clock);
+        this.Pauses = new DefaultAgentPauses(this.Store, this.Outbox, telemetry, this.Clock);
         this.Breaker = new DefaultCircuitBreaker(configProvider, options, telemetry, audit, this.Clock, this.Pauses);
-        this.CostGuard = new DefaultCostGuard(configProvider, options, telemetry, audit, this.Store, this.Clock);
+        this.CostGuard = new DefaultCostGuard(configProvider, options, telemetry, audit, this.Store, this.Outbox, this.Clock);
     }
 
     public MutableTimeProvider Clock { get; } = new(new DateTimeOffset(2026, 11, 8, 12, 0, 0, TimeSpan.Zero));
@@ -37,6 +39,8 @@ internal sealed class OperatorFixture
     public IApprovalEventSink Sink { get; } = Substitute.For<IApprovalEventSink>();
 
     public IOperatorStore Store { get; }
+
+    public OperatorAuditOutbox Outbox { get; }
 
     public DefaultApprovalGate Gate { get; }
 

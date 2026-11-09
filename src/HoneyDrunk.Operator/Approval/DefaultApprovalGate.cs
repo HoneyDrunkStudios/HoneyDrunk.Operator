@@ -14,19 +14,19 @@ namespace HoneyDrunk.Operator.Approval;
 /// </summary>
 /// <param name="emitter">Emits the approval-requested event.</param>
 /// <param name="telemetry">Operator telemetry.</param>
-/// <param name="audit">The audit writer.</param>
+/// <param name="outbox">Delivers the saved audit entries.</param>
 /// <param name="timeProvider">The clock.</param>
 /// <param name="store">Where requests and decisions are kept.</param>
 public sealed class DefaultApprovalGate(
     ApprovalEventEmitter emitter,
     OperatorTelemetry telemetry,
-    OperatorAuditWriter audit,
+    OperatorAuditOutbox outbox,
     TimeProvider timeProvider,
     IOperatorStore store) : IApprovalGate
 {
     private readonly ApprovalEventEmitter emitter = emitter ?? throw new ArgumentNullException(nameof(emitter));
     private readonly OperatorTelemetry telemetry = telemetry ?? throw new ArgumentNullException(nameof(telemetry));
-    private readonly OperatorAuditWriter audit = audit ?? throw new ArgumentNullException(nameof(audit));
+    private readonly OperatorAuditOutbox outbox = outbox ?? throw new ArgumentNullException(nameof(outbox));
     private readonly TimeProvider timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
     private readonly IOperatorStore store = store ?? throw new ArgumentNullException(nameof(store));
 
@@ -38,7 +38,15 @@ public sealed class DefaultApprovalGate(
         using var activity = this.telemetry.Start("approval-gate", "request");
         var now = this.timeProvider.GetUtcNow();
         var pending = new ApprovalDecision(request.ApprovalId, ApprovalOutcome.Pending, string.Empty, now, null);
-        if (!await this.store.TryAddApprovalAsync(new StoredApproval(request, pending, now), cancellationToken).ConfigureAwait(false))
+        var audit = PendingAudit.Create(
+            "operator.approval-gate.requested",
+            request.Subject,
+            AuditOutcome.Pending,
+            new AuditTarget("approval", request.ApprovalId),
+            request.Action,
+            request.RequesterCorrelationId,
+            now);
+        if (!await this.store.TryAddApprovalAsync(new StoredApproval(request, pending, now), audit, cancellationToken).ConfigureAwait(false))
         {
             // The id is known. Only the same request may read its recorded decision; an id reused for a different
             // action, subject, scope or context must never inherit another request's approval.
@@ -58,15 +66,8 @@ public sealed class DefaultApprovalGate(
             return current;
         }
 
-        // The request is stored; its audit entry must not be lost to the caller's cancellation.
-        await this.audit.WriteAsync(
-            "operator.approval-gate.requested",
-            request.Subject,
-            AuditOutcome.Pending,
-            new AuditTarget("approval", request.ApprovalId),
-            request.Action,
-            request.RequesterCorrelationId,
-            CancellationToken.None).ConfigureAwait(false);
+        // The request and its audit entry are saved together; delivery ignores the caller's cancellation.
+        await this.outbox.DeliverAsync(CancellationToken.None).ConfigureAwait(false);
         await this.emitter.EmitAsync(request, cancellationToken).ConfigureAwait(false);
         return pending;
     }

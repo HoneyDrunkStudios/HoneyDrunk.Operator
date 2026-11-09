@@ -38,10 +38,4 @@ public sealed class ApprovalEntity
 
     /// <summary>Gets or sets why.</summary>
     public string? Reason { get; set; }
-
-    /// <summary>Gets or sets a value indicating whether the recorded decision's audit entry has been written.</summary>
-    public bool DecisionAudited { get; set; }
-
-    /// <summary>Gets or sets when the current claim on writing the decision's audit entry lapses, in UTC ticks; null when none is held.</summary>
-    public long? AuditClaimedUntilTicks { get; set; }
 }

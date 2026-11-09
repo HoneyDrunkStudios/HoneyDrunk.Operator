@@ -1,13 +1,20 @@
+using HoneyDrunk.Audit.Abstractions;
 using HoneyDrunk.Operator.Abstractions;
 using HoneyDrunk.Operator.State;
 
 namespace HoneyDrunk.Operator.Approval;
 
-/// <summary>Reads an approval's current decision, recording Expired once when a pending request has run out of time.</summary>
+/// <summary>
+/// Reads an approval's current decision, recording Expired once, with its audit entry, when a pending request has run
+/// out of time. The entry is left in the outbox for the next delivery.
+/// </summary>
 internal static class ApprovalExpiry
 {
     /// <summary>The reason recorded on an expired request.</summary>
     public const string ExpiredReason = "Approval request expired before a decision was recorded.";
+
+    /// <summary>Who an expiry is recorded as.</summary>
+    public const string ExpiredBy = "operator:expiry";
 
     /// <summary>Reads the current decision.</summary>
     /// <param name="store">The store.</param>
@@ -29,7 +36,8 @@ internal static class ApprovalExpiry
         }
 
         var expired = stored.Decision with { Outcome = ApprovalOutcome.Expired, DecidedAt = now, Reason = ExpiredReason };
-        if (await store.TryUpdateDecisionAsync(approvalId, ApprovalOutcome.Pending, expired, cancellationToken).ConfigureAwait(false))
+        var audit = PendingAudit.Create("operator.approval-gate.expired", ExpiredBy, AuditOutcome.Denied, new AuditTarget("approval", approvalId), ExpiredReason, stored.Request.RequesterCorrelationId, now);
+        if (await store.TryUpdateDecisionAsync(approvalId, ApprovalOutcome.Pending, expired, audit, cancellationToken).ConfigureAwait(false))
         {
             return expired;
         }

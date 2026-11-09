@@ -10,15 +10,16 @@ All notable changes to this package are documented here. The format follows
 
 - `DefaultApprovalDesk` records a person's approve or deny once, by compare-and-set, and lists pending requests.
 - `DefaultAgentPauses` pauses and resumes named breakers; pauses override every breaker state.
-- The cost guard pauses an agent once when its monthly spend reaches its budget, never replacing a pause already in place. The stop runs before anything else once the spend is stored and ignores the caller's cancellation.
+- The cost guard pauses an agent once when its monthly spend reaches its budget, never replacing a pause already in place. The charge, the pause and their audit entries are saved in one store write, so a charge reaching the limit is never stored without its stop.
 - A scope's standing budget, `Budget:{scope}`, applies to every window that has no `Budget:{scope}:{window}` of its own.
 - A pending approval asked for again is announced again, so a failed announcement is not final.
-- A decision's audit entry is written once, by the caller that claims it in the store (`IOperatorStore.TryClaimDecisionAuditAsync`), even when several callers on several hosts make the same decision at once. A failed entry releases its claim, so the same decision made again writes it; a claim whose holder died lapses after one minute.
-- `IOperatorStore` and the in-memory default; audit entries for decisions, pauses, resumes and budget stops.
+- `IOperatorStore` and the in-memory default.
+- An audit outbox. Every request, decision, expiry, pause, resume, charge and budget stop is saved with its audit entry in one store write, and `OperatorAuditOutbox` delivers the entries to the audit sinks, oldest first, right after the change. Each entry is claimed for one minute, so hosts sharing a store deliver it once. A failing sink no longer fails the change: the entry stays in the outbox and `OperatorAuditDeliveryService`, a hosted service, retries it every `AuditDeliveryIntervalSeconds` (30 by default). Delivery is at least once. An entry the sink refuses does not hold back the ones after it; a pass stops after three failures in a row. Audit text longer than the outbox columns (reason 2000, correlation id 200 characters) is cut to fit, never refused.
 
 ### Changed
 
-- Constructors: `DefaultApprovalGate` takes `IOperatorStore`; `DefaultCircuitBreaker` takes `IAgentPauses`; `DefaultCostGuard` takes `IOperatorStore` and `TimeProvider`.
+- Constructors: `DefaultApprovalGate` takes `IOperatorStore` and `OperatorAuditOutbox` in place of `OperatorAuditWriter`; `DefaultCircuitBreaker` takes `IAgentPauses`; `DefaultCostGuard` takes `IOperatorStore`, `OperatorAuditOutbox` and `TimeProvider`.
+- `AddHoneyDrunkOperator` also registers logging, `OperatorAuditOutbox` and the `OperatorAuditDeliveryService` hosted service.
 - `DefaultCostGuard.RecordAsync` refuses an agent id longer than 194 characters, so its pause name fits.
 - `DefaultCostGuard.RecordAsync` reads the budget limit before storing the charge, so a configuration failure stores nothing and a retry charges once.
 - An approval id reused for a different request is refused instead of returning the earlier decision.

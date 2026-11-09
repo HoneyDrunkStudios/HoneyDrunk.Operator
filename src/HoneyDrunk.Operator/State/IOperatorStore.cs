@@ -3,11 +3,15 @@ using HoneyDrunk.Operator.Abstractions;
 namespace HoneyDrunk.Operator.State;
 
 /// <summary>
-/// Where Operator keeps the state that must survive a restart: approvals and their decisions, manual pauses, and
-/// spend per budget window. The InMemory provider is the default; HoneyDrunk.Operator.Data provides a durable one.
-/// Implementations must make <see cref="TryAddApprovalAsync"/>, <see cref="TryUpdateDecisionAsync"/>,
-/// <see cref="TryClaimDecisionAuditAsync"/> and <see cref="AddSpendAsync"/> atomic.
+/// Where Operator keeps the state that must survive a restart: approvals and their decisions, manual pauses, spend per
+/// budget window, and the outbox of audit entries not yet delivered. The InMemory provider is the default;
+/// HoneyDrunk.Operator.Data provides a durable one.
 /// </summary>
+/// <remarks>
+/// Every write that changes state takes the <see cref="PendingAudit"/> recording it and saves both atomically: the
+/// change and its entry are kept together or not at all, and a write that changes nothing saves no entry. Entries are
+/// then read with <see cref="ClaimAuditsAsync"/> and removed with <see cref="CompleteAuditAsync"/> once delivered.
+/// </remarks>
 public interface IOperatorStore
 {
     /// <summary>Reads an approval.</summary>
@@ -16,43 +20,21 @@ public interface IOperatorStore
     /// <returns>The approval, or null.</returns>
     Task<StoredApproval?> GetApprovalAsync(string approvalId, CancellationToken cancellationToken);
 
-    /// <summary>Adds an approval unless its id already exists.</summary>
+    /// <summary>Adds an approval and its audit entry unless the id already exists.</summary>
     /// <param name="approval">The approval.</param>
+    /// <param name="audit">The entry recording the request.</param>
     /// <param name="cancellationToken">Cancels the call.</param>
-    /// <returns>False when the id already exists; the stored one is kept.</returns>
-    Task<bool> TryAddApprovalAsync(StoredApproval approval, CancellationToken cancellationToken);
+    /// <returns>False when the id already exists; the stored one is kept and no entry is saved.</returns>
+    Task<bool> TryAddApprovalAsync(StoredApproval approval, PendingAudit audit, CancellationToken cancellationToken);
 
-    /// <summary>Replaces a decision only while the stored outcome is <paramref name="expected"/>.</summary>
+    /// <summary>Replaces a decision only while the stored outcome is <paramref name="expected"/>, saving its audit entry with it.</summary>
     /// <param name="approvalId">The approval id.</param>
     /// <param name="expected">The outcome the stored decision must still have.</param>
     /// <param name="decision">The new decision.</param>
+    /// <param name="audit">The entry recording the decision.</param>
     /// <param name="cancellationToken">Cancels the call.</param>
     /// <returns>True when the decision was replaced.</returns>
-    Task<bool> TryUpdateDecisionAsync(string approvalId, ApprovalOutcome expected, ApprovalDecision decision, CancellationToken cancellationToken);
-
-    /// <summary>
-    /// Claims the writing of a decision's audit entry until <paramref name="claimUntil"/>, so that of several callers
-    /// only one writes it. Succeeds only while the decision is not audited and no live claim exists: none was taken,
-    /// it was released, or it ended at or before <paramref name="now"/>. Must be atomic.
-    /// </summary>
-    /// <param name="approvalId">The approval id.</param>
-    /// <param name="now">The current time.</param>
-    /// <param name="claimUntil">When the claim lapses if it is neither released nor completed.</param>
-    /// <param name="cancellationToken">Cancels the call.</param>
-    /// <returns>True when this call holds the claim.</returns>
-    Task<bool> TryClaimDecisionAuditAsync(string approvalId, DateTimeOffset now, DateTimeOffset claimUntil, CancellationToken cancellationToken);
-
-    /// <summary>Releases a claim taken by <see cref="TryClaimDecisionAuditAsync"/> after its audit entry failed.</summary>
-    /// <param name="approvalId">The approval id.</param>
-    /// <param name="cancellationToken">Cancels the call.</param>
-    /// <returns>A task.</returns>
-    Task ReleaseDecisionAuditClaimAsync(string approvalId, CancellationToken cancellationToken);
-
-    /// <summary>Marks the recorded decision of an approval as audited and ends any claim on it.</summary>
-    /// <param name="approvalId">The approval id.</param>
-    /// <param name="cancellationToken">Cancels the call.</param>
-    /// <returns>A task.</returns>
-    Task MarkDecisionAuditedAsync(string approvalId, CancellationToken cancellationToken);
+    Task<bool> TryUpdateDecisionAsync(string approvalId, ApprovalOutcome expected, ApprovalDecision decision, PendingAudit audit, CancellationToken cancellationToken);
 
     /// <summary>Lists pending approvals that have not expired at <paramref name="now"/>, newest first.</summary>
     /// <param name="now">The current time.</param>
@@ -67,31 +49,28 @@ public interface IOperatorStore
     /// <returns>The pause, or null.</returns>
     Task<PauseState?> GetPauseAsync(string name, CancellationToken cancellationToken);
 
-    /// <summary>Stores a pause, replacing any for the same name.</summary>
+    /// <summary>Stores a pause, replacing any for the same name, with its audit entry.</summary>
     /// <param name="pause">The pause.</param>
+    /// <param name="audit">The entry recording the pause.</param>
     /// <param name="cancellationToken">Cancels the call.</param>
     /// <returns>A task.</returns>
-    Task SetPauseAsync(PauseState pause, CancellationToken cancellationToken);
+    Task SetPauseAsync(PauseState pause, PendingAudit audit, CancellationToken cancellationToken);
 
-    /// <summary>Stores a pause only when none exists for the name; an existing pause is never replaced.</summary>
-    /// <param name="pause">The pause.</param>
-    /// <param name="cancellationToken">Cancels the call.</param>
-    /// <returns>True when this call stored the pause.</returns>
-    Task<bool> TryAddPauseAsync(PauseState pause, CancellationToken cancellationToken);
-
-    /// <summary>Removes a pause.</summary>
+    /// <summary>Removes a pause, saving its audit entry only when a pause was removed.</summary>
     /// <param name="name">The breaker name.</param>
+    /// <param name="audit">The entry recording the resume.</param>
     /// <param name="cancellationToken">Cancels the call.</param>
     /// <returns>True when a pause was removed.</returns>
-    Task<bool> RemovePauseAsync(string name, CancellationToken cancellationToken);
+    Task<bool> RemovePauseAsync(string name, PendingAudit audit, CancellationToken cancellationToken);
 
-    /// <summary>Adds spend to a budget window atomically.</summary>
-    /// <param name="scope">The budget scope, an agent id for agents.</param>
-    /// <param name="window">The window key.</param>
-    /// <param name="amount">The non-negative amount.</param>
+    /// <summary>
+    /// Adds a charge to its budget window with its audit entry. When the new total reaches the stop's limit and no pause
+    /// of that name exists, the stop's pause and audit entries are saved in the same transaction.
+    /// </summary>
+    /// <param name="charge">The charge.</param>
     /// <param name="cancellationToken">Cancels the call.</param>
-    /// <returns>The window's new total.</returns>
-    Task<decimal> AddSpendAsync(string scope, string window, decimal amount, CancellationToken cancellationToken);
+    /// <returns>The new total, and whether this charge added the stop's pause.</returns>
+    Task<SpendResult> AddSpendAsync(SpendCharge charge, CancellationToken cancellationToken);
 
     /// <summary>Reads a budget window's total.</summary>
     /// <param name="scope">The budget scope.</param>
@@ -99,4 +78,22 @@ public interface IOperatorStore
     /// <param name="cancellationToken">Cancels the call.</param>
     /// <returns>The total, zero when nothing was spent.</returns>
     Task<decimal> GetSpendAsync(string scope, string window, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Claims up to <paramref name="limit"/> outbox entries for delivery, oldest first, until <paramref name="claimUntil"/>.
+    /// An entry is claimable when it was never claimed or its claim ended at or before <paramref name="now"/>, so of
+    /// several callers on several hosts each entry goes to one. Each claim must be atomic.
+    /// </summary>
+    /// <param name="now">The current time.</param>
+    /// <param name="claimUntil">When the claims lapse if the entries are not completed.</param>
+    /// <param name="limit">The most to claim.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The entries this call claimed.</returns>
+    Task<IReadOnlyList<PendingAudit>> ClaimAuditsAsync(DateTimeOffset now, DateTimeOffset claimUntil, int limit, CancellationToken cancellationToken);
+
+    /// <summary>Removes a delivered entry from the outbox.</summary>
+    /// <param name="auditId">The entry id.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>A task.</returns>
+    Task CompleteAuditAsync(Guid auditId, CancellationToken cancellationToken);
 }

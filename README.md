@@ -35,7 +35,8 @@ Since 0.2.0, two contracts let a person act on what the gate and the guard hold:
 The cost guard also stops an agent when its spend in the current UTC month (`CostWindows.Month`) reaches its
 budget: it pauses `agent:{agentId}` once, as `operator:budget`, and only a person lifts that pause. A budget is read
 from `Budget:{agentId}:{yyyy-MM}` for one month, or `Budget:{agentId}` for every month. Every
-decision, pause, resume and budget stop writes an audit entry.
+decision, pause, resume and budget stop writes an audit entry, saved with the change in one store write and delivered
+from the store's outbox, so a failing audit sink delays an entry but never loses it.
 
 Requests, decisions, pauses and spend live behind `IOperatorStore`. The default store is in memory; add
 `HoneyDrunk.Operator.Data` to keep them across restarts and share them between hosts.

@@ -1,4 +1,5 @@
 using HoneyDrunk.Operator.Abstractions;
+using HoneyDrunk.Operator.Audit;
 using Xunit;
 
 namespace HoneyDrunk.Operator.Tests;
@@ -115,5 +116,27 @@ public sealed class PauseTests
         var fixture = new OperatorFixture();
 
         await Assert.ThrowsAsync<ArgumentException>(() => fixture.Pauses.PauseAsync(Agent, pausedBy, reason));
+    }
+
+    /// <summary>A resume whose audit sink fails still records who lifted the pause and why, delivered later.</summary>
+    /// <returns>A task.</returns>
+    [Fact]
+    public async Task Resume_audit_survives_a_sink_failure()
+    {
+        var fixture = new OperatorFixture();
+        await fixture.Pauses.PauseAsync("agent:a", "founder", "checking");
+        fixture.AuditLog.ThrowOn = "operator.pauses.resumed";
+
+        Assert.True(await fixture.Pauses.ResumeAsync("agent:a", "founder", "all clear"));
+        Assert.Null(await fixture.Pauses.GetAsync("agent:a"));
+        Assert.False(await fixture.Pauses.ResumeAsync("agent:a", "founder", "again"));
+
+        fixture.AuditLog.ThrowOn = null;
+        fixture.Clock.Advance(OperatorAuditOutbox.ClaimLease);
+        await fixture.Outbox.DeliverAsync();
+
+        var resumed = Assert.Single(fixture.AuditLog.Entries, entry => entry.EventName == "operator.pauses.resumed");
+        Assert.Equal("founder", resumed.Actor);
+        Assert.Equal("all clear", resumed.Reason);
     }
 }

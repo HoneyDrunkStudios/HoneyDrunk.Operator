@@ -8,4 +8,4 @@ All notable changes to this package are documented here. The format follows
 
 ### Added
 
-- First release: `AddOperatorDataStore` registers a durable `IOperatorStore` over HoneyDrunk.Data.EntityFramework, built from `ApprovalDataService`, `PauseDataService` and `SpendDataService`.
+- First release: `AddOperatorDataStore` registers a durable `IOperatorStore` over HoneyDrunk.Data.EntityFramework, built from `ApprovalDataService`, `PauseDataService`, `SpendDataService` and `PendingAuditDataService`. Each change is saved with its audit entries in one transaction (`operator.PendingAudits`), and a charge reaching its budget is saved with its pause.

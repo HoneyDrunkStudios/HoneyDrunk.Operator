@@ -30,7 +30,8 @@ Plus `OperatorTelemetry` (Kernel `ITelemetryActivityFactory`), `OperatorAuditWri
   policies, and safety-filter config resolve from Azure App Configuration (ADR-0018 D6 / invariant 117).
 - **Kernel** — register an `ITelemetryActivityFactory` (ADR-0018 D7).
 - **Audit** — register an `IAuditLog` from `HoneyDrunk.Audit` to capture decisions (ADR-0030 / ADR-0031).
-  When absent, audit emission is a no-op (graceful degradation).
+  When absent, audit emission is a no-op (graceful degradation). Entries for changes wait in the store's outbox
+  until delivered; run the host as an `IHost` so `OperatorAuditDeliveryService` retries any that failed.
 - **Approval transport** — register an `IApprovalEventSink` to deliver approval-needed events; the
   default is a no-op sink. The wire shape is deferred per ADR-0018 D8.
 

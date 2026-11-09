@@ -1,5 +1,6 @@
 using HoneyDrunk.Audit.Abstractions;
 using HoneyDrunk.Kernel.Abstractions.Identity;
+using HoneyDrunk.Operator.State;
 
 namespace HoneyDrunk.Operator.Audit;
 
@@ -68,5 +69,15 @@ public sealed class OperatorAuditWriter(IEnumerable<IAuditLog> auditLogs)
         {
             await log.AppendAsync(entry, cancellationToken).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>Appends an outbox entry to every registered sink.</summary>
+    /// <param name="audit">The entry.</param>
+    /// <param name="cancellationToken">A token to observe for cancellation.</param>
+    /// <returns>A task representing the append across all sinks.</returns>
+    public Task WriteAsync(PendingAudit audit, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(audit);
+        return this.WriteAsync(audit.EventName, audit.Actor, audit.Outcome, new AuditTarget(audit.TargetType, audit.TargetId), audit.Reason, audit.CorrelationId, cancellationToken);
     }
 }

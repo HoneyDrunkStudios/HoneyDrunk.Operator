@@ -19,6 +19,9 @@ public sealed class OperatorDbContext(DbContextOptions<OperatorDbContext> option
     /// <summary>Gets the spend per budget window.</summary>
     public DbSet<SpendEntity> Spend => this.Set<SpendEntity>();
 
+    /// <summary>Gets the audit entries waiting for delivery.</summary>
+    public DbSet<PendingAuditEntity> PendingAudits => this.Set<PendingAuditEntity>();
+
     /// <inheritdoc />
     protected override string? Schema => "operator";
 
@@ -29,5 +32,6 @@ public sealed class OperatorDbContext(DbContextOptions<OperatorDbContext> option
         modelBuilder.ApplyConfiguration(new ApprovalEntityConfiguration());
         modelBuilder.ApplyConfiguration(new PauseEntityConfiguration());
         modelBuilder.ApplyConfiguration(new SpendEntityConfiguration());
+        modelBuilder.ApplyConfiguration(new PendingAuditEntityConfiguration());
     }
 }

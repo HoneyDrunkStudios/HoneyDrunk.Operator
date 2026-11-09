@@ -7,28 +7,25 @@ using HoneyDrunk.Operator.Telemetry;
 namespace HoneyDrunk.Operator.Approval;
 
 /// <summary>
-/// The default <see cref="IApprovalDesk"/>. A person's decision is written with compare-and-set on the pending
-/// state, so of two people deciding at once exactly one decision is stored. Its audit entry is written once, by the
-/// caller that claims it in the store.
+/// The default <see cref="IApprovalDesk"/>. A person's decision is written with compare-and-set on the pending state,
+/// together with its audit entry, so of two people deciding at once exactly one decision and one entry are stored. The
+/// entry is delivered from the store's outbox.
 /// </summary>
 /// <param name="store">Where requests and decisions are kept.</param>
-/// <param name="audit">The audit writer.</param>
+/// <param name="outbox">Delivers the saved audit entries.</param>
 /// <param name="telemetry">Operator telemetry.</param>
 /// <param name="timeProvider">The clock.</param>
 public sealed class DefaultApprovalDesk(
     IOperatorStore store,
-    OperatorAuditWriter audit,
+    OperatorAuditOutbox outbox,
     OperatorTelemetry telemetry,
     TimeProvider timeProvider) : IApprovalDesk
 {
     /// <summary>The most pending approvals returned by one call.</summary>
     public const int MaxPendingPage = 100;
 
-    /// <summary>How long a claim on writing a decision's audit entry lasts if its writer neither finishes nor releases it.</summary>
-    public static readonly TimeSpan AuditClaimLease = TimeSpan.FromMinutes(1);
-
     private readonly IOperatorStore store = store ?? throw new ArgumentNullException(nameof(store));
-    private readonly OperatorAuditWriter audit = audit ?? throw new ArgumentNullException(nameof(audit));
+    private readonly OperatorAuditOutbox outbox = outbox ?? throw new ArgumentNullException(nameof(outbox));
     private readonly OperatorTelemetry telemetry = telemetry ?? throw new ArgumentNullException(nameof(telemetry));
     private readonly TimeProvider timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
 
@@ -48,18 +45,26 @@ public sealed class DefaultApprovalDesk(
         var current = await ApprovalExpiry.CurrentAsync(this.store, approvalId, now, cancellationToken).ConfigureAwait(false);
         if (current is null || current.Outcome != ApprovalOutcome.Pending)
         {
-            return await this.SettledAsync(current, outcome).ConfigureAwait(false);
+            return Settled(current, outcome);
         }
 
         var decision = new ApprovalDecision(approvalId, outcome, approver, now, reason);
-        if (!await this.store.TryUpdateDecisionAsync(approvalId, ApprovalOutcome.Pending, decision, cancellationToken).ConfigureAwait(false))
+        var audit = PendingAudit.Create(
+            "operator.approval-desk.decided",
+            approver,
+            outcome == ApprovalOutcome.Approved ? AuditOutcome.Succeeded : AuditOutcome.Denied,
+            new AuditTarget("approval", approvalId),
+            reason,
+            null,
+            now);
+        if (!await this.store.TryUpdateDecisionAsync(approvalId, ApprovalOutcome.Pending, decision, audit, cancellationToken).ConfigureAwait(false))
         {
             // Another decision landed first.
             var stored = (await this.store.GetApprovalAsync(approvalId, cancellationToken).ConfigureAwait(false))?.Decision;
-            return await this.SettledAsync(stored, outcome).ConfigureAwait(false);
+            return Settled(stored, outcome);
         }
 
-        await this.AuditDecisionAsync(decision).ConfigureAwait(false);
+        await this.outbox.DeliverAsync(CancellationToken.None).ConfigureAwait(false);
         return decision;
     }
 
@@ -71,50 +76,6 @@ public sealed class DefaultApprovalDesk(
         using var activity = this.telemetry.Start("approval-desk", "list-pending");
         var pending = await this.store.ListPendingAsync(this.timeProvider.GetUtcNow(), limit, cancellationToken).ConfigureAwait(false);
         return pending.Select(item => new PendingApproval(item.Request, item.RequestedAt)).ToArray();
-    }
-
-    // The decision is stored. Only the caller holding the store's claim writes its audit entry, so callers deciding the
-    // same way at once, on any host, write one entry. The claim, the entry and the mark ignore the caller's
-    // cancellation. If the audit sink fails, the claim is released and the same decision made again writes the entry;
-    // a claim whose holder died lapses after AuditClaimLease.
-    private async Task AuditDecisionAsync(ApprovalDecision decision)
-    {
-        var now = this.timeProvider.GetUtcNow();
-        if (!await this.store.TryClaimDecisionAuditAsync(decision.ApprovalId, now, now + AuditClaimLease, CancellationToken.None).ConfigureAwait(false))
-        {
-            return;
-        }
-
-        try
-        {
-            await this.audit.WriteAsync(
-                "operator.approval-desk.decided",
-                decision.ApproverIdentity,
-                decision.Outcome == ApprovalOutcome.Approved ? AuditOutcome.Succeeded : AuditOutcome.Denied,
-                new AuditTarget("approval", decision.ApprovalId),
-                decision.Reason,
-                cancellationToken: CancellationToken.None).ConfigureAwait(false);
-        }
-        catch
-        {
-            await this.store.ReleaseDecisionAuditClaimAsync(decision.ApprovalId, CancellationToken.None).ConfigureAwait(false);
-            throw;
-        }
-
-        await this.store.MarkDecisionAuditedAsync(decision.ApprovalId, CancellationToken.None).ConfigureAwait(false);
-    }
-
-    // The same decision again completes an audit entry that failed earlier; it never writes a second one.
-    private async Task<ApprovalDecision?> SettledAsync(ApprovalDecision? stored, ApprovalOutcome requested)
-    {
-        var settled = Settled(stored, requested);
-        if (settled is not null && settled.Outcome == requested
-            && await this.store.GetApprovalAsync(settled.ApprovalId, CancellationToken.None).ConfigureAwait(false) is { DecisionAudited: false } record)
-        {
-            await this.AuditDecisionAsync(record.Decision).ConfigureAwait(false);
-        }
-
-        return settled;
     }
 
     // An already-settled approval: the same decision again is a no-op, Expired is reported, anything else conflicts.

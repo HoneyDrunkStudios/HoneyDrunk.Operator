@@ -2,6 +2,7 @@ using HoneyDrunk.Kernel.Abstractions.Telemetry;
 using HoneyDrunk.Operator.Abstractions;
 using HoneyDrunk.Operator.Telemetry;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using NSubstitute;
 using Xunit;
 
@@ -41,6 +42,15 @@ public sealed class ServiceRegistrationTests
         using var provider = BuildProvider();
         Assert.NotNull(provider.GetService<OperatorTelemetry>());
         Assert.False(provider.GetRequiredService<Audit.OperatorAuditWriter>().IsEnabled);
+    }
+
+    /// <summary>The audit outbox and its background delivery are registered.</summary>
+    [Fact]
+    public void Audit_outbox_delivery_is_registered()
+    {
+        using var provider = BuildProvider();
+        Assert.NotNull(provider.GetService<Audit.OperatorAuditOutbox>());
+        Assert.Contains(provider.GetServices<IHostedService>(), service => service is Audit.OperatorAuditDeliveryService);
     }
 
     private static ServiceProvider BuildProvider()

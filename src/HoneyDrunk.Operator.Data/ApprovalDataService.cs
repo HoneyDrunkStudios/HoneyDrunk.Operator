@@ -4,7 +4,10 @@ using Microsoft.EntityFrameworkCore;
 
 namespace HoneyDrunk.Operator.Data;
 
-/// <summary>Reads and writes approval requests and their decisions. Each call uses its own context from the factory.</summary>
+/// <summary>
+/// Reads and writes approval requests and their decisions, each write with its outbox entry in one transaction. Each
+/// call uses its own context from the factory.
+/// </summary>
 /// <param name="contexts">Creates a context per call.</param>
 public sealed class ApprovalDataService(IDbContextFactory<OperatorDbContext> contexts)
 {
@@ -19,20 +22,30 @@ public sealed class ApprovalDataService(IDbContextFactory<OperatorDbContext> con
     }
 
     /// <inheritdoc cref="IOperatorStore.TryAddApprovalAsync" />
-    public async Task<bool> TryAddApprovalAsync(StoredApproval approval, CancellationToken cancellationToken)
+    public async Task<bool> TryAddApprovalAsync(StoredApproval approval, PendingAudit audit, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(approval);
+        ArgumentNullException.ThrowIfNull(audit);
         await using var context = await this.contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         if (await context.Approvals.AnyAsync(row => row.ApprovalId == approval.Request.ApprovalId, cancellationToken).ConfigureAwait(false))
         {
             return false;
         }
 
-        context.Approvals.Add(ApprovalRows.ToRow(approval));
+        // The request and its entry are kept together, and a lost commit reply is not replayed.
         try
         {
-            await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-            return true;
+            return await OperatorUnitOfWork.RunAsync(
+                context,
+                audit.Id,
+                async token =>
+                {
+                    context.Approvals.Add(ApprovalRows.ToRow(approval));
+                    context.PendingAudits.Add(PendingAuditRows.ToRow(audit));
+                    await context.SaveChangesAsync(token).ConfigureAwait(false);
+                    return true;
+                },
+                cancellationToken).ConfigureAwait(false);
         }
         catch (DbUpdateException) when (this.ApprovalExists(approval.Request.ApprovalId))
         {
@@ -43,58 +56,36 @@ public sealed class ApprovalDataService(IDbContextFactory<OperatorDbContext> con
     }
 
     /// <inheritdoc cref="IOperatorStore.TryUpdateDecisionAsync" />
-    public async Task<bool> TryUpdateDecisionAsync(string approvalId, ApprovalOutcome expected, ApprovalDecision decision, CancellationToken cancellationToken)
+    public async Task<bool> TryUpdateDecisionAsync(string approvalId, ApprovalOutcome expected, ApprovalDecision decision, PendingAudit audit, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(decision);
+        ArgumentNullException.ThrowIfNull(audit);
         await using var context = await this.contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-        var updated = await context.Approvals
-            .Where(row => row.ApprovalId == approvalId && row.Outcome == (int)expected)
-            .ExecuteUpdateAsync(
-                setters => setters
-                    .SetProperty(row => row.Outcome, (int)decision.Outcome)
-                    .SetProperty(row => row.ApproverIdentity, decision.ApproverIdentity)
-                    .SetProperty(row => row.DecidedAtTicks, decision.DecidedAt.UtcTicks)
-                    .SetProperty(row => row.Reason, decision.Reason),
-                cancellationToken)
-            .ConfigureAwait(false);
-        return updated == 1;
-    }
+        return await OperatorUnitOfWork.RunAsync(
+            context,
+            audit.Id,
+            async token =>
+            {
+                var updated = await context.Approvals
+                    .Where(row => row.ApprovalId == approvalId && row.Outcome == (int)expected)
+                    .ExecuteUpdateAsync(
+                        setters => setters
+                            .SetProperty(row => row.Outcome, (int)decision.Outcome)
+                            .SetProperty(row => row.ApproverIdentity, decision.ApproverIdentity)
+                            .SetProperty(row => row.DecidedAtTicks, decision.DecidedAt.UtcTicks)
+                            .SetProperty(row => row.Reason, decision.Reason),
+                        token)
+                    .ConfigureAwait(false);
+                if (updated != 1)
+                {
+                    return false;
+                }
 
-    /// <inheritdoc cref="IOperatorStore.TryClaimDecisionAuditAsync" />
-    public async Task<bool> TryClaimDecisionAuditAsync(string approvalId, DateTimeOffset now, DateTimeOffset claimUntil, CancellationToken cancellationToken)
-    {
-        await using var context = await this.contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-        var nowTicks = now.UtcTicks;
-        var untilTicks = claimUntil.UtcTicks;
-        var updated = await context.Approvals
-            .Where(row => row.ApprovalId == approvalId && !row.DecisionAudited && (row.AuditClaimedUntilTicks == null || row.AuditClaimedUntilTicks <= nowTicks))
-            .ExecuteUpdateAsync(setters => setters.SetProperty(row => row.AuditClaimedUntilTicks, untilTicks), cancellationToken)
-            .ConfigureAwait(false);
-        return updated == 1;
-    }
-
-    /// <inheritdoc cref="IOperatorStore.ReleaseDecisionAuditClaimAsync" />
-    public async Task ReleaseDecisionAuditClaimAsync(string approvalId, CancellationToken cancellationToken)
-    {
-        await using var context = await this.contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-        await context.Approvals
-            .Where(row => row.ApprovalId == approvalId)
-            .ExecuteUpdateAsync(setters => setters.SetProperty(row => row.AuditClaimedUntilTicks, (long?)null), cancellationToken)
-            .ConfigureAwait(false);
-    }
-
-    /// <inheritdoc cref="IOperatorStore.MarkDecisionAuditedAsync" />
-    public async Task MarkDecisionAuditedAsync(string approvalId, CancellationToken cancellationToken)
-    {
-        await using var context = await this.contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-        await context.Approvals
-            .Where(row => row.ApprovalId == approvalId)
-            .ExecuteUpdateAsync(
-                setters => setters
-                    .SetProperty(row => row.DecisionAudited, true)
-                    .SetProperty(row => row.AuditClaimedUntilTicks, (long?)null),
-                cancellationToken)
-            .ConfigureAwait(false);
+                context.PendingAudits.Add(PendingAuditRows.ToRow(audit));
+                await context.SaveChangesAsync(token).ConfigureAwait(false);
+                return true;
+            },
+            cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc cref="IOperatorStore.ListPendingAsync" />

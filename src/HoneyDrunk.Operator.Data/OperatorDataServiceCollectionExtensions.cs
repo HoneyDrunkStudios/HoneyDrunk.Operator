@@ -26,10 +26,12 @@ public static class OperatorDataServiceCollectionExtensions
         services.TryAddSingleton<ApprovalDataService>();
         services.TryAddSingleton<PauseDataService>();
         services.TryAddSingleton<SpendDataService>();
+        services.TryAddSingleton<PendingAuditDataService>();
         services.AddSingleton<IOperatorStore>(provider => new OperatorDataStore(
             provider.GetRequiredService<ApprovalDataService>(),
             provider.GetRequiredService<PauseDataService>(),
-            provider.GetRequiredService<SpendDataService>()));
+            provider.GetRequiredService<SpendDataService>(),
+            provider.GetRequiredService<PendingAuditDataService>()));
         return services;
     }
 }
