@@ -104,6 +104,37 @@ public abstract class OperatorStoreContract
         Assert.Equal(context.OrderBy(pair => pair.Key, StringComparer.Ordinal), stored!.Request.Context.OrderBy(pair => pair.Key, StringComparer.Ordinal));
     }
 
+    /// <summary>
+    /// Nothing a caller holds can change a stored request's context: not the dictionary it was added with, and not
+    /// one handed back by a read or by the pending list.
+    /// </summary>
+    /// <returns>A task.</returns>
+    [Fact]
+    public async Task Stored_context_cannot_be_changed_from_outside()
+    {
+        var store = this.CreateStore();
+        var context = new Dictionary<string, string>(StringComparer.Ordinal) { ["path"] = "/reports" };
+        await store.TryAddApprovalAsync(Pending("a1", Now, context: context), Audit("r"), CancellationToken.None);
+        var read = (await store.GetApprovalAsync("a1", CancellationToken.None))!.Request.Context;
+        var listed = Assert.Single(await store.ListPendingAsync(Now, 10, CancellationToken.None)).Request.Context;
+
+        context["path"] = "/secrets";
+        foreach (var handed in new[] { read, listed })
+        {
+            try
+            {
+                ((IDictionary<string, string>)handed)["path"] = "/secrets";
+            }
+            catch (NotSupportedException)
+            {
+                // A read-only context refuses the write; a copy accepts it and changes nothing stored.
+            }
+        }
+
+        Assert.Equal("/reports", (await store.GetApprovalAsync("a1", CancellationToken.None))!.Request.Context["path"]);
+        Assert.Equal("/reports", Assert.Single(await store.ListPendingAsync(Now, 10, CancellationToken.None)).Request.Context["path"]);
+    }
+
     /// <summary>Pauses are set, read and removed; a remove that finds nothing saves no entry.</summary>
     /// <returns>A task.</returns>
     [Fact]

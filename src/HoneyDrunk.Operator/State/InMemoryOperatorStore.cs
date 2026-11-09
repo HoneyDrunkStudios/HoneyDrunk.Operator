@@ -1,4 +1,5 @@
 using HoneyDrunk.Operator.Abstractions;
+using System.Collections.Frozen;
 
 namespace HoneyDrunk.Operator.State;
 
@@ -29,7 +30,10 @@ public sealed class InMemoryOperatorStore : IOperatorStore
     {
         ArgumentNullException.ThrowIfNull(approval);
         ArgumentNullException.ThrowIfNull(audit);
-        var copy = approval with { Request = approval.Request with { Context = new Dictionary<string, string>(approval.Request.Context, StringComparer.Ordinal) } };
+
+        // The stored context is a frozen copy: the caller's dictionary cannot change it, and neither can anyone who
+        // later reads the request, so an approved request stays the request that was approved.
+        var copy = approval with { Request = approval.Request with { Context = approval.Request.Context.ToFrozenDictionary(StringComparer.Ordinal) } };
         lock (this.sync)
         {
             if (!this.approvals.TryAdd(approval.Request.ApprovalId, copy))

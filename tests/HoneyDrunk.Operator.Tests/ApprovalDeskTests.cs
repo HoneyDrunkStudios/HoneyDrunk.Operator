@@ -49,6 +49,33 @@ public sealed class ApprovalDeskTests
         await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Gate.RequestAsync(different));
     }
 
+    /// <summary>
+    /// What a caller reads from the desk or the gate's store cannot be used to change the stored request: after an
+    /// approval, editing a listed request's context does not let a different request inherit that approval.
+    /// </summary>
+    /// <returns>A task.</returns>
+    [Fact]
+    public async Task Listed_request_cannot_be_edited_into_an_approved_one()
+    {
+        var fixture = new OperatorFixture();
+        await fixture.Gate.RequestAsync(fixture.Request(context: new Dictionary<string, string> { ["path"] = "/reports" }));
+        var listed = Assert.Single(await fixture.Desk.ListPendingAsync());
+        await fixture.Desk.DecideAsync("a1", ApprovalOutcome.Approved, "founder", "reports only");
+
+        try
+        {
+            ((IDictionary<string, string>)listed.Request.Context)["path"] = "/secrets";
+        }
+        catch (NotSupportedException)
+        {
+            // The context is read-only, which is the point.
+        }
+
+        var different = fixture.Request(context: new Dictionary<string, string> { ["path"] = "/secrets" });
+        await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Gate.RequestAsync(different));
+        Assert.Equal("/reports", (await fixture.Store.GetApprovalAsync("a1", CancellationToken.None))!.Request.Context["path"]);
+    }
+
     /// <summary>An approval is visible to the gate.</summary>
     /// <returns>A task.</returns>
     [Fact]
