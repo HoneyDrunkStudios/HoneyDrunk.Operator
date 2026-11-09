@@ -46,7 +46,7 @@ public sealed class OperatorAuditWriter(IEnumerable<IAuditLog> auditLogs)
         CancellationToken cancellationToken = default) =>
 
         // No time is given, so each sink stamps the entry when it appends it.
-        this.AppendAsync(eventName, actor, outcome, target, reason, correlationId, default, cancellationToken);
+        this.AppendAsync(Entry(eventName, actor, outcome, target, reason, correlationId), cancellationToken);
 
     /// <summary>
     /// Appends an outbox entry to every registered sink. The entry carries the time its change happened, so one
@@ -58,39 +58,27 @@ public sealed class OperatorAuditWriter(IEnumerable<IAuditLog> auditLogs)
     public Task WriteAsync(PendingAudit audit, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(audit);
-        return this.AppendAsync(audit.EventName, audit.Actor, audit.Outcome, new AuditTarget(audit.TargetType, audit.TargetId), audit.Reason, audit.CorrelationId, audit.CreatedAt, cancellationToken);
+        var entry = Entry(audit.EventName, audit.Actor, audit.Outcome, new AuditTarget(audit.TargetType, audit.TargetId), audit.Reason, audit.CorrelationId);
+        return this.AppendAsync(entry with { OccurredAt = audit.CreatedAt }, cancellationToken);
     }
 
-    private async Task AppendAsync(
-        string eventName,
-        string actor,
-        AuditOutcome outcome,
-        AuditTarget target,
-        string? reason,
-        string? correlationId,
-        DateTimeOffset occurredAt,
-        CancellationToken cancellationToken)
+    private static AuditEntry Entry(string eventName, string actor, AuditOutcome outcome, AuditTarget target, string? reason, string? correlationId) => new(
+        AuditEntryId.Empty,
+        default,
+        actor,
+        eventName,
+        AuditCategory.SystemAction,
+        outcome,
+        target,
+        TenantId.Internal,
+        correlationId,
+        AuditOperation.None,
+        Changes: null,
+        Metadata: null,
+        Reason: reason);
+
+    private async Task AppendAsync(AuditEntry entry, CancellationToken cancellationToken)
     {
-        if (this.auditLogs.Count == 0)
-        {
-            return;
-        }
-
-        var entry = new AuditEntry(
-            AuditEntryId.Empty,
-            occurredAt,
-            actor,
-            eventName,
-            AuditCategory.SystemAction,
-            outcome,
-            target,
-            TenantId.Internal,
-            correlationId,
-            AuditOperation.None,
-            Changes: null,
-            Metadata: null,
-            Reason: reason);
-
         foreach (var log in this.auditLogs)
         {
             await log.AppendAsync(entry, cancellationToken).ConfigureAwait(false);
