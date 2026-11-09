@@ -76,6 +76,59 @@ public sealed class ApprovalDeskTests
         Assert.Equal("/reports", (await fixture.Store.GetApprovalAsync("a1", CancellationToken.None))!.Request.Context["path"]);
     }
 
+    /// <summary>
+    /// A repeated request is compared key by key, exactly, whatever comparer its context dictionary uses: a
+    /// case-insensitive dictionary cannot make a different request look like the approved one.
+    /// </summary>
+    /// <returns>A task.</returns>
+    [Fact]
+    public async Task Rerequest_is_compared_exactly_whatever_its_dictionary_comparer()
+    {
+        var fixture = new OperatorFixture();
+        var twoCases = fixture.Request("a1", new Dictionary<string, string>(StringComparer.Ordinal) { ["path"] = "/reports", ["PATH"] = "/reports" });
+        var oneKey = fixture.Request("a2", new Dictionary<string, string>(StringComparer.Ordinal) { ["tool"] = "search" });
+        foreach (var request in new[] { twoCases, oneKey })
+        {
+            await fixture.Gate.RequestAsync(request);
+            await fixture.Desk.DecideAsync(request.ApprovalId, ApprovalOutcome.Approved, "founder", "as requested");
+        }
+
+        var smuggled = twoCases with { Context = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["path"] = "/reports", ["command"] = "delete" } };
+        var otherCase = oneKey with { Context = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["TOOL"] = "search" } };
+        var same = oneKey with { Context = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["tool"] = "search" } };
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Gate.RequestAsync(smuggled));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Gate.RequestAsync(otherCase));
+        Assert.Equal(ApprovalOutcome.Approved, (await fixture.Gate.RequestAsync(same)).Outcome);
+    }
+
+    /// <summary>
+    /// The request that is announced is the request that was stored, even when the caller edits its context while
+    /// the request is being raised, and each announcement's context is read-only.
+    /// </summary>
+    /// <returns>A task.</returns>
+    [Fact]
+    public async Task Announcement_carries_the_request_as_it_was_stored()
+    {
+        var fixture = new OperatorFixture();
+        var announced = new List<ApprovalRequest>();
+        fixture.Sink.EmitApprovalNeededAsync(Arg.Do<ApprovalRequest>(announced.Add), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        var context = new Dictionary<string, string> { ["path"] = "/secrets" };
+        fixture.AuditLog.HoldOn = "operator.approval-gate.requested";
+
+        var raising = fixture.Gate.RequestAsync(fixture.Request(context: context));
+        await fixture.AuditLog.Held.Task;
+        context["path"] = "/reports";
+        fixture.AuditLog.Release.SetResult();
+        await raising;
+        await fixture.Gate.RequestAsync(fixture.Request(context: new Dictionary<string, string> { ["path"] = "/secrets" }));
+
+        Assert.Equal(2, announced.Count);
+        Assert.All(announced, request => Assert.Equal("/secrets", request.Context["path"]));
+        Assert.All(announced, request => Assert.Throws<NotSupportedException>(() => ((IDictionary<string, string>)request.Context)["path"] = "/reports"));
+        Assert.Equal("/secrets", (await fixture.Store.GetApprovalAsync("a1", CancellationToken.None))!.Request.Context["path"]);
+    }
+
     /// <summary>An approval is visible to the gate.</summary>
     /// <returns>A task.</returns>
     [Fact]

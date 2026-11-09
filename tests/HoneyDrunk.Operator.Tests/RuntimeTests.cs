@@ -108,7 +108,11 @@ public sealed class RuntimeTests
         var decision = await gate.RequestAsync(request);
 
         Assert.Equal(ApprovalOutcome.Pending, decision.Outcome);
-        await sink.Received(1).EmitApprovalNeededAsync(request, Arg.Any<CancellationToken>());
+
+        // The gate announces its own read-only snapshot of the request, so the match is on content.
+        await sink.Received(1).EmitApprovalNeededAsync(
+            Arg.Is<ApprovalRequest>(announced => announced.ApprovalId == "a1" && announced.Subject == "subject" && announced.Action == "deploy" && announced.RequestedScope == "scope" && announced.Expiry == request.Expiry && announced.Context.Count == 0),
+            Arg.Any<CancellationToken>());
 
         var status = await gate.CheckStatusAsync("a1");
         Assert.NotNull(status);

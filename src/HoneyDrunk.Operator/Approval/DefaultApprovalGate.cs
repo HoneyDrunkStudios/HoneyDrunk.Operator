@@ -4,6 +4,7 @@ using HoneyDrunk.Operator.Audit;
 using HoneyDrunk.Operator.Events;
 using HoneyDrunk.Operator.State;
 using HoneyDrunk.Operator.Telemetry;
+using System.Collections.Frozen;
 
 namespace HoneyDrunk.Operator.Approval;
 
@@ -35,6 +36,11 @@ public sealed class DefaultApprovalGate(
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.ApprovalId);
+        ArgumentNullException.ThrowIfNull(request.Context, nameof(request));
+
+        // One read-only snapshot, taken before any await, is what is stored, compared and announced. The caller's
+        // dictionary can change afterwards without changing the request a person is asked to decide.
+        request = request with { Context = request.Context.ToFrozenDictionary(StringComparer.Ordinal) };
         using var activity = this.telemetry.Start("approval-gate", "request");
         var now = this.timeProvider.GetUtcNow();
         var pending = new ApprovalDecision(request.ApprovalId, ApprovalOutcome.Pending, string.Empty, now, null);
@@ -60,7 +66,8 @@ public sealed class DefaultApprovalGate(
             if (current.Outcome == ApprovalOutcome.Pending)
             {
                 // Announce again while still pending, so an announcement that failed or was cancelled is not final.
-                await this.emitter.EmitAsync(request, cancellationToken).ConfigureAwait(false);
+                // The stored request is the one a decision applies to, so that is the one announced.
+                await this.emitter.EmitAsync(stored.Request with { Context = stored.Request.Context.ToFrozenDictionary(StringComparer.Ordinal) }, cancellationToken).ConfigureAwait(false);
             }
 
             return current;
@@ -80,6 +87,8 @@ public sealed class DefaultApprovalGate(
         return await ApprovalExpiry.CurrentAsync(this.store, approvalId, this.timeProvider.GetUtcNow(), cancellationToken).ConfigureAwait(false);
     }
 
+    // The incoming context is the gate's own ordinal snapshot, so its lookups are exact whatever comparer the
+    // caller's dictionary used. Equal counts and every stored pair found make the two sets of pairs the same.
     private static bool SameRequest(ApprovalRequest stored, ApprovalRequest incoming) =>
         string.Equals(stored.Subject, incoming.Subject, StringComparison.Ordinal)
         && string.Equals(stored.Action, incoming.Action, StringComparison.Ordinal)

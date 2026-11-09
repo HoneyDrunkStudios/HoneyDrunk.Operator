@@ -22,7 +22,7 @@ All notable changes to this package are documented here. The format follows
 - `AddHoneyDrunkOperator` also registers logging, `OperatorAuditOutbox` and the `OperatorAuditDeliveryService` hosted service.
 - `DefaultCostGuard.RecordAsync` refuses an agent id longer than 194 characters, so its pause name fits.
 - `DefaultCostGuard.RecordAsync` reads the budget limit before storing the charge, so a configuration failure stores nothing and a retry charges once.
-- An approval id reused for a different request is refused instead of returning the earlier decision.
+- An approval id reused for a different request is refused instead of returning the earlier decision. The gate takes a read-only snapshot of each request before it stores, compares or announces it, and compares context keys exactly, so neither a later edit to the caller's dictionary nor a case-insensitive dictionary can make a different request inherit an approval.
 
 ## [0.1.2] - 2026-11-05
 
