@@ -27,6 +27,28 @@ public sealed class OutboxTests
         Assert.Equal(["good-1", "good-2"], fixture.AuditLog.Entries.Select(entry => entry.EventName));
     }
 
+    /// <summary>
+    /// An entry delivered late carries the time its change happened, not the time the sink finally took it, so the
+    /// order of policy changes can still be read from the audit log.
+    /// </summary>
+    /// <returns>A task.</returns>
+    [Fact]
+    public async Task Delayed_delivery_keeps_the_time_of_the_change()
+    {
+        var fixture = new OperatorFixture();
+        var pausedAt = fixture.Clock.GetUtcNow();
+        fixture.AuditLog.ThrowOn = "operator.pauses.paused";
+        await fixture.Pauses.PauseAsync("agent:a", "founder", "checking");
+        fixture.AuditLog.ThrowOn = null;
+        fixture.Clock.Advance(TimeSpan.FromHours(2));
+        var resumedAt = fixture.Clock.GetUtcNow();
+        await fixture.Pauses.ResumeAsync("agent:a", "founder", "checked");
+
+        Assert.Equal(
+            [(name: "operator.pauses.paused", at: pausedAt), (name: "operator.pauses.resumed", at: resumedAt)],
+            fixture.AuditLog.Entries.Select(entry => (name: entry.EventName, at: entry.OccurredAt)));
+    }
+
     /// <summary>Audit text longer than the outbox columns is cut to fit, so a long correlation id or reason never blocks the change.</summary>
     [Fact]
     public void Long_audit_text_is_cut_to_fit()

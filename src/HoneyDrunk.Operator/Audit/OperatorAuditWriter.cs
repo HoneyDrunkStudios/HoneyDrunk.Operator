@@ -36,14 +36,40 @@ public sealed class OperatorAuditWriter(IEnumerable<IAuditLog> auditLogs)
     /// <param name="correlationId">An optional correlation identifier.</param>
     /// <param name="cancellationToken">A token to observe for cancellation.</param>
     /// <returns>A task representing the append across all sinks.</returns>
-    public async Task WriteAsync(
+    public Task WriteAsync(
         string eventName,
         string actor,
         AuditOutcome outcome,
         AuditTarget target,
         string? reason = null,
         string? correlationId = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+
+        // No time is given, so each sink stamps the entry when it appends it.
+        this.AppendAsync(eventName, actor, outcome, target, reason, correlationId, default, cancellationToken);
+
+    /// <summary>
+    /// Appends an outbox entry to every registered sink. The entry carries the time its change happened, so one
+    /// delivered late still shows when the approval, pause, resume or budget stop took place.
+    /// </summary>
+    /// <param name="audit">The entry.</param>
+    /// <param name="cancellationToken">A token to observe for cancellation.</param>
+    /// <returns>A task representing the append across all sinks.</returns>
+    public Task WriteAsync(PendingAudit audit, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(audit);
+        return this.AppendAsync(audit.EventName, audit.Actor, audit.Outcome, new AuditTarget(audit.TargetType, audit.TargetId), audit.Reason, audit.CorrelationId, audit.CreatedAt, cancellationToken);
+    }
+
+    private async Task AppendAsync(
+        string eventName,
+        string actor,
+        AuditOutcome outcome,
+        AuditTarget target,
+        string? reason,
+        string? correlationId,
+        DateTimeOffset occurredAt,
+        CancellationToken cancellationToken)
     {
         if (this.auditLogs.Count == 0)
         {
@@ -52,7 +78,7 @@ public sealed class OperatorAuditWriter(IEnumerable<IAuditLog> auditLogs)
 
         var entry = new AuditEntry(
             AuditEntryId.Empty,
-            default,
+            occurredAt,
             actor,
             eventName,
             AuditCategory.SystemAction,
@@ -69,15 +95,5 @@ public sealed class OperatorAuditWriter(IEnumerable<IAuditLog> auditLogs)
         {
             await log.AppendAsync(entry, cancellationToken).ConfigureAwait(false);
         }
-    }
-
-    /// <summary>Appends an outbox entry to every registered sink.</summary>
-    /// <param name="audit">The entry.</param>
-    /// <param name="cancellationToken">A token to observe for cancellation.</param>
-    /// <returns>A task representing the append across all sinks.</returns>
-    public Task WriteAsync(PendingAudit audit, CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(audit);
-        return this.WriteAsync(audit.EventName, audit.Actor, audit.Outcome, new AuditTarget(audit.TargetType, audit.TargetId), audit.Reason, audit.CorrelationId, cancellationToken);
     }
 }
