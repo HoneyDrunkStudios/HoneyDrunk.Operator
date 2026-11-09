@@ -257,6 +257,20 @@ public sealed class ApprovalDeskTests
         Assert.Equal(ApprovalOutcome.Expired, (await inner.GetApprovalAsync("a1", CancellationToken.None))!.Decision.Outcome);
     }
 
+    /// <summary>A request with no context is refused before anything is stored or announced, and the error names the context.</summary>
+    /// <returns>A task.</returns>
+    [Fact]
+    public async Task Request_without_a_context_is_refused()
+    {
+        var fixture = new OperatorFixture();
+
+        var failure = await Assert.ThrowsAsync<ArgumentNullException>(() => fixture.Gate.RequestAsync(fixture.Request() with { Context = null! }));
+
+        Assert.Equal("request.Context", failure.ParamName);
+        Assert.Null(await fixture.Store.GetApprovalAsync("a1", CancellationToken.None));
+        await fixture.Sink.DidNotReceiveWithAnyArgs().EmitApprovalNeededAsync(null!, default);
+    }
+
     /// <summary>An unknown id gives null.</summary>
     /// <returns>A task.</returns>
     [Fact]
