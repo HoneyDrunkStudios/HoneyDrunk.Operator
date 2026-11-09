@@ -66,8 +66,15 @@ public sealed class ApprovalDataService(IDbContextFactory<OperatorDbContext> con
             audit.Id,
             async token =>
             {
-                var updated = await context.Approvals
-                    .Where(row => row.ApprovalId == approvalId && row.Outcome == (int)expected)
+                var rows = context.Approvals.Where(row => row.ApprovalId == approvalId && row.Outcome == (int)expected);
+                if (decision.Outcome is ApprovalOutcome.Approved or ApprovalOutcome.Denied)
+                {
+                    // A person's decision dated after the expiry is refused by the same statement that writes it.
+                    var decidedAtTicks = decision.DecidedAt.UtcTicks;
+                    rows = rows.Where(row => row.ExpiryTicks >= decidedAtTicks);
+                }
+
+                var updated = await rows
                     .ExecuteUpdateAsync(
                         setters => setters
                             .SetProperty(row => row.Outcome, (int)decision.Outcome)

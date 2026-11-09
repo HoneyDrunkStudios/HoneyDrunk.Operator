@@ -47,6 +47,32 @@ public abstract class OperatorStoreContract
         Assert.Equal(["requested", "approved"], await ClaimNames(store));
     }
 
+    /// <summary>
+    /// The store itself refuses an approve or deny dated after the request's expiry, so a decision that reaches it
+    /// late cannot be recorded; marking the request expired is still accepted.
+    /// </summary>
+    /// <param name="outcome">The person's decision.</param>
+    /// <returns>A task.</returns>
+    [Theory]
+    [InlineData(ApprovalOutcome.Approved)]
+    [InlineData(ApprovalOutcome.Denied)]
+    public async Task Person_decision_dated_after_expiry_is_refused(ApprovalOutcome outcome)
+    {
+        var store = this.CreateStore();
+        var expiry = Now.AddMinutes(5);
+        await store.TryAddApprovalAsync(Pending("late", Now, expiry), Audit("requested"), CancellationToken.None);
+        await store.TryAddApprovalAsync(Pending("in-time", Now, expiry), Audit("requested"), CancellationToken.None);
+        var late = new ApprovalDecision("late", outcome, "founder", expiry.AddTicks(1), "too late");
+        var inTime = new ApprovalDecision("in-time", outcome, "founder", expiry, "just in time");
+        var expired = new ApprovalDecision("late", ApprovalOutcome.Expired, string.Empty, expiry.AddMinutes(1), "expired");
+
+        Assert.False(await store.TryUpdateDecisionAsync("late", ApprovalOutcome.Pending, late, Audit("decided late"), CancellationToken.None));
+        Assert.Equal(ApprovalOutcome.Pending, (await store.GetApprovalAsync("late", CancellationToken.None))!.Decision.Outcome);
+        Assert.True(await store.TryUpdateDecisionAsync("in-time", ApprovalOutcome.Pending, inTime, Audit("decided in time"), CancellationToken.None));
+        Assert.True(await store.TryUpdateDecisionAsync("late", ApprovalOutcome.Pending, expired, Audit("expired"), CancellationToken.None));
+        Assert.Equal(["requested", "requested", "decided in time", "expired"], await ClaimNames(store));
+    }
+
     /// <summary>The pending list is newest first and leaves out decided and expired requests.</summary>
     /// <returns>A task.</returns>
     [Fact]

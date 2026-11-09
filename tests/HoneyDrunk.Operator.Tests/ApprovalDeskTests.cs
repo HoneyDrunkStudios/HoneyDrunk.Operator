@@ -1,5 +1,6 @@
 using HoneyDrunk.Operator.Abstractions;
 using HoneyDrunk.Operator.Audit;
+using HoneyDrunk.Operator.State;
 using NSubstitute;
 using Xunit;
 
@@ -135,6 +136,45 @@ public sealed class ApprovalDeskTests
 
         Assert.Equal(ApprovalOutcome.Expired, decision!.Outcome);
         Assert.Equal(ApprovalOutcome.Expired, (await fixture.Gate.CheckStatusAsync("a1"))!.Outcome);
+    }
+
+    /// <summary>
+    /// A decision whose read of the request stalls past the expiry is not recorded: the request expires, whatever
+    /// the desk saw before the stall.
+    /// </summary>
+    /// <param name="outcome">The person's decision.</param>
+    /// <returns>A task.</returns>
+    [Theory]
+    [InlineData(ApprovalOutcome.Approved)]
+    [InlineData(ApprovalOutcome.Denied)]
+    public async Task Decision_that_stalls_past_expiry_expires_the_request(ApprovalOutcome outcome)
+    {
+        var inner = new InMemoryOperatorStore();
+        var store = Substitute.For<IOperatorStore>();
+        OperatorFixture? fixture = null;
+        var stallNextRead = false;
+        store.TryAddApprovalAsync(null!, null!, default).ReturnsForAnyArgs(call => inner.TryAddApprovalAsync(call.Arg<StoredApproval>(), call.Arg<PendingAudit>(), CancellationToken.None));
+        store.TryUpdateDecisionAsync(null!, default, null!, null!, default).ReturnsForAnyArgs(call => inner.TryUpdateDecisionAsync(call.Arg<string>(), call.Arg<ApprovalOutcome>(), call.Arg<ApprovalDecision>(), call.Arg<PendingAudit>(), CancellationToken.None));
+        store.GetApprovalAsync(null!, default).ReturnsForAnyArgs(async call =>
+        {
+            var read = await inner.GetApprovalAsync(call.Arg<string>(), CancellationToken.None);
+            if (stallNextRead)
+            {
+                // The read answers with the request still pending, but only after its expiry has passed.
+                stallNextRead = false;
+                fixture!.Clock.Advance(TimeSpan.FromHours(2));
+            }
+
+            return read;
+        });
+        fixture = new OperatorFixture(store);
+        await fixture.Gate.RequestAsync(fixture.Request());
+        stallNextRead = true;
+
+        var decision = await fixture.Desk.DecideAsync("a1", outcome, "founder", "decided before the stall");
+
+        Assert.Equal(ApprovalOutcome.Expired, decision!.Outcome);
+        Assert.Equal(ApprovalOutcome.Expired, (await inner.GetApprovalAsync("a1", CancellationToken.None))!.Decision.Outcome);
     }
 
     /// <summary>An unknown id gives null.</summary>

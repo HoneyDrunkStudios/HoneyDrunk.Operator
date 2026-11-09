@@ -54,6 +54,12 @@ public sealed class InMemoryOperatorStore : IOperatorStore
                 return Task.FromResult(false);
             }
 
+            // A person's decision dated after the expiry is refused here, under the same lock as the write.
+            if (decision.Outcome is ApprovalOutcome.Approved or ApprovalOutcome.Denied && decision.DecidedAt > current.Request.Expiry)
+            {
+                return Task.FromResult(false);
+            }
+
             this.approvals[approvalId] = current with { Decision = decision };
             this.Enqueue(audit);
             return Task.FromResult(true);

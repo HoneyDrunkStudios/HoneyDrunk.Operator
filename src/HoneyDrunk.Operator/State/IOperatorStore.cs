@@ -27,13 +27,18 @@ public interface IOperatorStore
     /// <returns>False when the id already exists; the stored one is kept and no entry is saved.</returns>
     Task<bool> TryAddApprovalAsync(StoredApproval approval, PendingAudit audit, CancellationToken cancellationToken);
 
-    /// <summary>Replaces a decision only while the stored outcome is <paramref name="expected"/>, saving its audit entry with it.</summary>
+    /// <summary>
+    /// Replaces a decision only while the stored outcome is <paramref name="expected"/>, saving its audit entry with it.
+    /// An <see cref="ApprovalOutcome.Approved"/> or <see cref="ApprovalOutcome.Denied"/> decision is also refused when
+    /// it is dated after the request's expiry, in the same conditional write, so a decision that reaches the store
+    /// late can never be recorded on an expired request.
+    /// </summary>
     /// <param name="approvalId">The approval id.</param>
     /// <param name="expected">The outcome the stored decision must still have.</param>
     /// <param name="decision">The new decision.</param>
     /// <param name="audit">The entry recording the decision.</param>
     /// <param name="cancellationToken">Cancels the call.</param>
-    /// <returns>True when the decision was replaced.</returns>
+    /// <returns>True when the decision was replaced; false when the outcome differs or the request had expired.</returns>
     Task<bool> TryUpdateDecisionAsync(string approvalId, ApprovalOutcome expected, ApprovalDecision decision, PendingAudit audit, CancellationToken cancellationToken);
 
     /// <summary>Lists pending approvals that have not expired at <paramref name="now"/>, newest first.</summary>

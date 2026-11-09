@@ -41,13 +41,15 @@ public sealed class DefaultApprovalDesk(
         OperatorText.Identity(approver, nameof(approver));
         OperatorText.Reason(reason, nameof(reason));
         using var activity = this.telemetry.Start("approval-desk", "decide");
-        var now = this.timeProvider.GetUtcNow();
-        var current = await ApprovalExpiry.CurrentAsync(this.store, approvalId, now, cancellationToken).ConfigureAwait(false);
+        var current = await ApprovalExpiry.CurrentAsync(this.store, approvalId, this.timeProvider.GetUtcNow(), cancellationToken).ConfigureAwait(false);
         if (current is null || current.Outcome != ApprovalOutcome.Pending)
         {
             return Settled(current, outcome);
         }
 
+        // The decision is dated after the read, and the store refuses it once that time is past the request's
+        // expiry. A read that stalls cannot turn into an approval of an expired request.
+        var now = this.timeProvider.GetUtcNow();
         var decision = new ApprovalDecision(approvalId, outcome, approver, now, reason);
         var audit = PendingAudit.Create(
             "operator.approval-desk.decided",
@@ -59,8 +61,8 @@ public sealed class DefaultApprovalDesk(
             now);
         if (!await this.store.TryUpdateDecisionAsync(approvalId, ApprovalOutcome.Pending, decision, audit, cancellationToken).ConfigureAwait(false))
         {
-            // Another decision landed first.
-            var stored = (await this.store.GetApprovalAsync(approvalId, cancellationToken).ConfigureAwait(false))?.Decision;
+            // Another decision landed first, or the request expired before this one was dated.
+            var stored = await ApprovalExpiry.CurrentAsync(this.store, approvalId, this.timeProvider.GetUtcNow(), cancellationToken).ConfigureAwait(false);
             return Settled(stored, outcome);
         }
 

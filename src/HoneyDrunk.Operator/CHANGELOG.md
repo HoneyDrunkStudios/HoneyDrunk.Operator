@@ -8,7 +8,7 @@ All notable changes to this package are documented here. The format follows
 
 ### Added
 
-- `DefaultApprovalDesk` records a person's approve or deny once, by compare-and-set, and lists pending requests.
+- `DefaultApprovalDesk` records a person's approve or deny once, by compare-and-set, and lists pending requests. The decision is dated after the request is read, and the store refuses an approve or deny dated after the request's expiry in the same conditional write, so a slow read cannot approve an expired request.
 - `DefaultAgentPauses` pauses and resumes named breakers; pauses override every breaker state.
 - The cost guard pauses an agent once when its monthly spend reaches its budget, never replacing a pause already in place. The charge, the pause and their audit entries are saved in one store write, so a charge reaching the limit is never stored without its stop.
 - A scope's standing budget, `Budget:{scope}`, applies to every window that has no `Budget:{scope}:{window}` of its own.
