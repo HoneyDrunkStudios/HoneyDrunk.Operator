@@ -11,15 +11,21 @@ internal sealed class LostCommitReply : DbTransactionInterceptor
 {
     public bool Armed { get; set; }
 
-    public override Task TransactionCommittedAsync(DbTransaction transaction, TransactionEndEventData eventData, CancellationToken cancellationToken = default)
+    /// <summary>Gets or sets work run after the commit and before its reply is lost, as another host would run it.</summary>
+    public Func<Task>? MeanwhileAsync { get; set; }
+
+    public override async Task TransactionCommittedAsync(DbTransaction transaction, TransactionEndEventData eventData, CancellationToken cancellationToken = default)
     {
         if (this.Armed)
         {
             this.Armed = false;
+            if (this.MeanwhileAsync is { } meanwhile)
+            {
+                await meanwhile().ConfigureAwait(false);
+            }
+
             throw new LostReplyException();
         }
-
-        return Task.CompletedTask;
     }
 
     /// <summary>The lost reply.</summary>

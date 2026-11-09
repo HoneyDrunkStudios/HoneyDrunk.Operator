@@ -10,7 +10,7 @@ namespace HoneyDrunk.Operator.State;
 /// <remarks>
 /// Every write that changes state takes the <see cref="PendingAudit"/> recording it and saves both atomically: the
 /// change and its entry are kept together or not at all, and a write that changes nothing saves no entry. Entries are
-/// then read with <see cref="ClaimAuditsAsync"/> and removed with <see cref="CompleteAuditAsync"/> once delivered.
+/// then read with <see cref="ClaimAuditsAsync"/> and marked delivered with <see cref="CompleteAuditAsync"/>.
 /// </remarks>
 public interface IOperatorStore
 {
@@ -91,9 +91,13 @@ public interface IOperatorStore
     /// <returns>The entries this call claimed.</returns>
     Task<IReadOnlyList<PendingAudit>> ClaimAuditsAsync(DateTimeOffset now, DateTimeOffset claimUntil, int limit, CancellationToken cancellationToken);
 
-    /// <summary>Removes a delivered entry from the outbox.</summary>
+    /// <summary>
+    /// Marks an entry delivered, so it is never claimed again. A store that checks for an entry to learn whether a
+    /// commit happened must keep the delivered entry long enough for that check, and may remove it after.
+    /// </summary>
     /// <param name="auditId">The entry id.</param>
+    /// <param name="deliveredAt">When it was delivered.</param>
     /// <param name="cancellationToken">Cancels the call.</param>
     /// <returns>A task.</returns>
-    Task CompleteAuditAsync(Guid auditId, CancellationToken cancellationToken);
+    Task CompleteAuditAsync(Guid auditId, DateTimeOffset deliveredAt, CancellationToken cancellationToken);
 }

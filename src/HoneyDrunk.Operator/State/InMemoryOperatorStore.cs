@@ -168,7 +168,8 @@ public sealed class InMemoryOperatorStore : IOperatorStore
     }
 
     /// <inheritdoc />
-    public Task CompleteAuditAsync(Guid auditId, CancellationToken cancellationToken)
+    /// <remarks>Nothing here checks for an entry after a commit, so a delivered entry is removed at once.</remarks>
+    public Task CompleteAuditAsync(Guid auditId, DateTimeOffset deliveredAt, CancellationToken cancellationToken)
     {
         lock (this.sync)
         {

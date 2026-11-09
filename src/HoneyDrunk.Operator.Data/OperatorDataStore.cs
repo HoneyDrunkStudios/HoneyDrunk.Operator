@@ -55,5 +55,5 @@ internal sealed class OperatorDataStore(ApprovalDataService approvals, PauseData
         this.audits.ClaimAuditsAsync(now, claimUntil, limit, cancellationToken);
 
     /// <inheritdoc />
-    public Task CompleteAuditAsync(Guid auditId, CancellationToken cancellationToken) => this.audits.CompleteAuditAsync(auditId, cancellationToken);
+    public Task CompleteAuditAsync(Guid auditId, DateTimeOffset deliveredAt, CancellationToken cancellationToken) => this.audits.CompleteAuditAsync(auditId, deliveredAt, cancellationToken);
 }

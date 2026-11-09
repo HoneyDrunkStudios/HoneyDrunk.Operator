@@ -153,7 +153,7 @@ public abstract class OperatorStoreContract
 
         var firstTwo = await store.ClaimAuditsAsync(Now, Now + Lease, 2, CancellationToken.None);
         var rest = await store.ClaimAuditsAsync(Now.AddSeconds(30), Now.AddSeconds(30) + Lease, 10, CancellationToken.None);
-        await store.CompleteAuditAsync(firstTwo[0].Id, CancellationToken.None);
+        await store.CompleteAuditAsync(firstTwo[0].Id, Now, CancellationToken.None);
         var lapsed = await store.ClaimAuditsAsync(Now + Lease, Now + Lease + Lease, 10, CancellationToken.None);
 
         Assert.Equal(["first", "second"], firstTwo.Select(entry => entry.EventName));

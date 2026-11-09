@@ -13,6 +13,7 @@ internal sealed class PendingAuditEntityConfiguration : IEntityTypeConfiguration
         builder.HasKey(row => row.Sequence);
         builder.Property(row => row.Sequence).ValueGeneratedOnAdd();
         builder.HasIndex(row => row.Id).IsUnique();
+        builder.HasIndex(row => new { row.DeliveredAtTicks, row.Sequence });
         builder.Property(row => row.EventName).HasMaxLength(200).IsRequired();
         builder.Property(row => row.Actor).HasMaxLength(200).IsRequired();
         builder.Property(row => row.Outcome).IsRequired();

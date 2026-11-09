@@ -1,6 +1,6 @@
 namespace HoneyDrunk.Operator.Data;
 
-/// <summary>An audit entry waiting for delivery, saved in the same transaction as the change it records.</summary>
+/// <summary>An audit entry saved in the same transaction as the change it records, then delivered from the outbox.</summary>
 public sealed class PendingAuditEntity
 {
     /// <summary>Gets or sets the insertion order, assigned by the database; entries are delivered in this order.</summary>
@@ -35,4 +35,10 @@ public sealed class PendingAuditEntity
 
     /// <summary>Gets or sets when the current delivery claim lapses, in UTC ticks; null when unclaimed.</summary>
     public long? ClaimedUntilTicks { get; set; }
+
+    /// <summary>
+    /// Gets or sets when the entry was delivered, in UTC ticks; null while it waits. A delivered entry is kept for
+    /// <see cref="PendingAuditDataService.DeliveredRetention"/> as the proof that its change committed.
+    /// </summary>
+    public long? DeliveredAtTicks { get; set; }
 }

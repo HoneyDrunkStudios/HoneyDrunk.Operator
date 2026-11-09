@@ -6,10 +6,10 @@ namespace HoneyDrunk.Operator.Audit;
 /// <summary>
 /// Delivers the audit entries waiting in the <see cref="IOperatorStore"/> outbox to the audit sinks, oldest first.
 /// Each entry is claimed for <see cref="ClaimLease"/> before it is written, so callers on several hosts deliver it once;
-/// it is removed once written. An entry whose write fails stays in the outbox and is tried again after its lease
+/// it is marked delivered once written. An entry whose write fails stays in the outbox and is tried again after its lease
 /// lapses, and the entries after it are still delivered; after <see cref="MaxConsecutiveFailures"/> failures in a row
-/// the pass stops, as the sink is likely down. Delivery is at least once: if an entry is written but its removal
-/// fails, it is written again.
+/// the pass stops, as the sink is likely down. Delivery is at least once: if an entry is written but marking it
+/// delivered fails, it is written again.
 /// </summary>
 /// <param name="store">The store holding the outbox.</param>
 /// <param name="writer">Writes to the audit sinks.</param>
@@ -36,8 +36,8 @@ public sealed partial class OperatorAuditOutbox(
     private readonly ILogger<OperatorAuditOutbox> logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     /// <summary>
-    /// Delivers one batch of waiting entries. A failure is logged, never thrown: the change it records is already
-    /// saved, and a caller that saw an exception could retry the change itself.
+    /// Delivers one batch of waiting entries. A failure is logged, not thrown: the change it records is already saved,
+    /// and a caller that saw an exception could retry the change itself. Only a process out of memory or stack throws.
     /// </summary>
     /// <param name="cancellationToken">Stops between entries; an entry being written is finished.</param>
     /// <returns>How many entries were delivered.</returns>
@@ -49,10 +49,9 @@ public sealed partial class OperatorAuditOutbox(
             var now = this.timeProvider.GetUtcNow();
             claimed = await this.store.ClaimAuditsAsync(now, now + ClaimLease, BatchSize, CancellationToken.None).ConfigureAwait(false);
         }
-#pragma warning disable CA1031 // Delivery must not fail a change that is already saved; the entry is retried.
-        catch (Exception ex)
-#pragma warning restore CA1031
+        catch (Exception ex) when (IsRecoverable(ex))
         {
+            // Delivery must not fail a change that is already saved; the entries are retried.
             this.LogClaimFailed(ex);
             return 0;
         }
@@ -69,15 +68,14 @@ public sealed partial class OperatorAuditOutbox(
             try
             {
                 await this.writer.WriteAsync(audit, CancellationToken.None).ConfigureAwait(false);
-                await this.store.CompleteAuditAsync(audit.Id, CancellationToken.None).ConfigureAwait(false);
+                await this.store.CompleteAuditAsync(audit.Id, this.timeProvider.GetUtcNow(), CancellationToken.None).ConfigureAwait(false);
                 delivered++;
                 failures = 0;
             }
-#pragma warning disable CA1031 // As above: the entry stays in the outbox and is retried after its lease.
-            catch (Exception ex)
-#pragma warning restore CA1031
+            catch (Exception ex) when (IsRecoverable(ex))
             {
-                // One entry may be refused on its own; keep going unless the sink looks down.
+                // The entry stays in the outbox and is retried after its lease. One entry may be refused on its own;
+                // keep going unless the sink looks down.
                 this.LogDeliveryFailed(ex, audit.EventName, audit.Id);
                 if (++failures >= MaxConsecutiveFailures)
                 {
@@ -88,6 +86,9 @@ public sealed partial class OperatorAuditOutbox(
 
         return delivered;
     }
+
+    // A process out of memory or stack is not in a state to keep delivering; let that failure through.
+    private static bool IsRecoverable(Exception exception) => exception is not (OutOfMemoryException or InsufficientExecutionStackException);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Operator could not read its audit outbox; entries are retried later.")]
     private partial void LogClaimFailed(Exception exception);

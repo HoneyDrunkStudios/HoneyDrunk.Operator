@@ -163,6 +163,51 @@ public sealed class OperatorDataServiceTests : OperatorStoreContract, IDisposabl
         Assert.Equal(["recorded", "paused", "recorded", "resumed"], (await store.ClaimAuditsAsync(Now, Now + Lease, 10, CancellationToken.None)).Select(entry => entry.EventName));
     }
 
+    /// <summary>
+    /// A charge whose reply is lost is not replayed even when another host delivers its audit entry before the retry
+    /// checks for it: a delivered entry is kept as the proof that its change committed.
+    /// </summary>
+    /// <returns>A task.</returns>
+    [Fact]
+    public async Task Lost_commit_reply_is_not_replayed_after_delivery()
+    {
+        var lostReply = new LostCommitReply();
+        var store = this.Store(options => options
+            .UseSqlite(this.database.ConnectionString, sqlite => sqlite.ExecutionStrategy(dependencies => new RetryOnLostReply(dependencies)))
+            .AddInterceptors(lostReply));
+        var otherHost = this.CreateStore();
+        await store.AddSpendAsync(Charge(6m), CancellationToken.None);
+        lostReply.MeanwhileAsync = async () =>
+        {
+            foreach (var entry in await otherHost.ClaimAuditsAsync(Now, Now + Lease, 10, CancellationToken.None))
+            {
+                await otherHost.CompleteAuditAsync(entry.Id, Now, CancellationToken.None);
+            }
+        };
+
+        lostReply.Armed = true;
+        var result = await store.AddSpendAsync(Charge(4m), CancellationToken.None);
+
+        Assert.Equal(10m, result.Total);
+        Assert.Equal(10m, await store.GetSpendAsync("agent-a", "2026-11", CancellationToken.None));
+        Assert.Empty(await store.ClaimAuditsAsync(Now, Now + Lease, 10, CancellationToken.None));
+    }
+
+    /// <summary>A delivered entry is kept for the retention period and removed by a later delivery once it has passed.</summary>
+    /// <returns>A task.</returns>
+    [Fact]
+    public async Task Delivered_entry_is_kept_for_a_day_then_removed()
+    {
+        var store = this.CreateStore();
+        var first = await Deliver(store, "first", Now);
+        var second = await Deliver(store, "second", Now.AddHours(1));
+        var keptIds = await this.StoredAuditIds();
+        var third = await Deliver(store, "third", Now.Add(PendingAuditDataService.DeliveredRetention).AddHours(1));
+
+        Assert.Equal([first, second], keptIds);
+        Assert.Equal([second, third], await this.StoredAuditIds());
+    }
+
     /// <summary>Registration replaces the in-memory store whichever order the host calls it in.</summary>
     [Fact]
     public void Data_store_replaces_inmemory()
@@ -197,5 +242,19 @@ public sealed class OperatorDataServiceTests : OperatorStoreContract, IDisposabl
         var provider = services.BuildServiceProvider();
         this.providers.Add(provider);
         return provider.GetRequiredService<IOperatorStore>();
+    }
+
+    private static async Task<Guid> Deliver(IOperatorStore store, string name, DateTimeOffset at)
+    {
+        await store.SetPauseAsync(new PauseState("agent:" + name, "founder", "checking", at), Audit(name, at), CancellationToken.None);
+        var entry = Assert.Single(await store.ClaimAuditsAsync(at, at + Lease, 10, CancellationToken.None));
+        await store.CompleteAuditAsync(entry.Id, at, CancellationToken.None);
+        return entry.Id;
+    }
+
+    private async Task<Guid[]> StoredAuditIds()
+    {
+        await using var context = await this.database.Factory.CreateDbContextAsync(CancellationToken.None);
+        return await context.PendingAudits.OrderBy(row => row.Sequence).Select(row => row.Id).ToArrayAsync(CancellationToken.None);
     }
 }
