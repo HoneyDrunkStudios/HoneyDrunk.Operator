@@ -53,7 +53,7 @@ public sealed class ScopedApprovalDataTests
             }
         });
         using var provider = services.BuildServiceProvider();
-        var scoped = Assert.IsAssignableFrom<ISubjectScopedOperatorStore>(provider.GetRequiredService<IOperatorStore>());
+        var scoped = Assert.IsType<ISubjectScopedOperatorStore>(provider.GetRequiredService<IOperatorStore>(), exactMatch: false);
         capture.Reset();
 
         var result = await scoped.ListPendingAsync(Now, new PendingApprovalQuery(["agent:a", "agent:b"], 2), CancellationToken.None);

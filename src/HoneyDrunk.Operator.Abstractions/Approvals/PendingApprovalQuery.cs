@@ -18,7 +18,7 @@ public sealed class PendingApprovalQuery
         ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(limit, MaxLimit);
         var snapshot = subjects.Take(MaxSubjects + 1).ToArray();
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(snapshot.Length, MaxSubjects, nameof(subjects));
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(snapshot.Length, MaxSubjects);
         foreach (var subject in snapshot)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(subject);
