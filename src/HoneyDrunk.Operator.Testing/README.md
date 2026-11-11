@@ -16,3 +16,7 @@ development. References **only** `HoneyDrunk.Operator.Abstractions` (invariant 3
 | `InMemoryCostGuard` | `ICostGuard` | Accumulates spend against `DefaultLimit`. |
 | `PermissiveDecisionPolicy` | `IDecisionPolicy` | Always `Allow`. |
 | `PermissiveSafetyFilter` | `ISafetyFilter` | Always allowed. |
+
+Since 0.3.0, `InMemoryApprovalDesk` also implements `Approvals.ISubjectScopedApprovalDesk`: it filters the
+fixture's pending requests by subject before newest-first ordering and the result limit. This fixture keeps
+all requests in memory and is not a production storage or expiry-enforcement substitute.

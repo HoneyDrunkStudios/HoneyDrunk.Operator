@@ -1,4 +1,5 @@
 using HoneyDrunk.Operator.Abstractions;
+using HoneyDrunk.Operator.Abstractions.Approvals;
 using System.Collections.Frozen;
 
 namespace HoneyDrunk.Operator.State;
@@ -7,7 +8,7 @@ namespace HoneyDrunk.Operator.State;
 /// The default store: process memory only, so nothing survives a restart. Use HoneyDrunk.Operator.Data in production.
 /// One lock guards every write, so each change and its audit entry are saved together.
 /// </summary>
-public sealed class InMemoryOperatorStore : IOperatorStore
+public sealed class InMemoryOperatorStore : IOperatorStore, ISubjectScopedOperatorStore
 {
     private readonly Lock sync = new();
     private readonly Dictionary<string, StoredApproval> approvals = new(StringComparer.Ordinal);
@@ -82,6 +83,32 @@ public sealed class InMemoryOperatorStore : IOperatorStore
                     .OrderByDescending(approval => approval.RequestedAt)
                     .ThenBy(approval => approval.Request.ApprovalId, StringComparer.Ordinal)
                     .Take(limit),
+            ];
+            return Task.FromResult(pending);
+        }
+    }
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<StoredApproval>> ListPendingAsync(DateTimeOffset now, PendingApprovalQuery query, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (query.Subjects.Count == 0)
+        {
+            return Task.FromResult<IReadOnlyList<StoredApproval>>([]);
+        }
+
+        var subjects = query.Subjects.ToHashSet(StringComparer.Ordinal);
+        lock (this.sync)
+        {
+            IReadOnlyList<StoredApproval> pending =
+            [
+                .. this.approvals.Values
+                    .Where(approval => approval.Decision.Outcome == ApprovalOutcome.Pending && approval.Request.Expiry > now)
+                    .Where(approval => subjects.Contains(approval.Request.Subject))
+                    .OrderByDescending(approval => approval.RequestedAt)
+                    .ThenBy(approval => approval.Request.ApprovalId, StringComparer.Ordinal)
+                    .Take(query.Limit),
             ];
             return Task.FromResult(pending);
         }

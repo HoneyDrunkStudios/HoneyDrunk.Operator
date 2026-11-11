@@ -14,6 +14,8 @@ Downstream Nodes compile against this package only (invariant 116). Runtime comp
 | `IDecisionPolicy` | interface | Allow / deny / require-approval evaluation of an action. |
 | `ISafetyFilter` | interface | Validate content against a safety rule set. |
 | `IApprovalDesk` | interface | List pending approvals and record a person's approve or deny (0.2.0). |
+| `Approvals.ISubjectScopedApprovalDesk` | interface | Optional subject filter applied before the pending-result limit (0.3.0). |
+| `Approvals.PendingApprovalQuery` | class | Immutable query with up to 100 subjects and 100 results; an empty scope matches nothing (0.3.0). |
 | `IAgentPauses` | interface | Pause a named breaker until a person resumes it (0.2.0). |
 | `ApprovalRequest` | record | A request for human approval. |
 | `ApprovalDecision` | record | The decision recorded against an approval request. |

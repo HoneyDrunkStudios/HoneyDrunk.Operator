@@ -1,5 +1,11 @@
 # Changelog — HoneyDrunk.Operator
 
+## [0.3.0] - 2026-11-11
+
+### Added
+
+- Added optional subject-scoped pending approval reads. Runtime, relational storage, and test desks filter selected subjects before applying the result limit without changing existing desk or store contracts.
+
 ## [0.2.0] - 2026-11-08
 
 ### Added
