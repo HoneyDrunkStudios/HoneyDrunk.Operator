@@ -1,5 +1,6 @@
 using HoneyDrunk.Audit.Abstractions;
 using HoneyDrunk.Operator.Abstractions;
+using HoneyDrunk.Operator.Abstractions.Approvals;
 using HoneyDrunk.Operator.Audit;
 using HoneyDrunk.Operator.State;
 using HoneyDrunk.Operator.Telemetry;
@@ -19,7 +20,7 @@ public sealed class DefaultApprovalDesk(
     IOperatorStore store,
     OperatorAuditOutbox outbox,
     OperatorTelemetry telemetry,
-    TimeProvider timeProvider) : IApprovalDesk
+    TimeProvider timeProvider) : IApprovalDesk, ISubjectScopedApprovalDesk
 {
     /// <summary>The most pending approvals returned by one call.</summary>
     public const int MaxPendingPage = 100;
@@ -77,6 +78,26 @@ public sealed class DefaultApprovalDesk(
         ArgumentOutOfRangeException.ThrowIfGreaterThan(limit, MaxPendingPage);
         using var activity = this.telemetry.Start("approval-desk", "list-pending");
         var pending = await this.store.ListPendingAsync(this.timeProvider.GetUtcNow(), limit, cancellationToken).ConfigureAwait(false);
+        return [.. pending.Select(item => new PendingApproval(item.Request, item.RequestedAt))];
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<PendingApproval>> ListPendingAsync(PendingApprovalQuery query, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (query.Subjects.Count == 0)
+        {
+            return [];
+        }
+
+        if (this.store is not ISubjectScopedOperatorStore scoped)
+        {
+            throw new NotSupportedException("The Operator store does not support subject-scoped approval reads.");
+        }
+
+        using var activity = this.telemetry.Start("approval-desk", "list-pending-scoped");
+        var pending = await scoped.ListPendingAsync(this.timeProvider.GetUtcNow(), query, cancellationToken).ConfigureAwait(false);
         return [.. pending.Select(item => new PendingApproval(item.Request, item.RequestedAt))];
     }
 

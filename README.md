@@ -45,6 +45,18 @@ from the store's outbox, so a failing audit sink delays an entry but never loses
 Requests, decisions, pauses and spend live behind `IOperatorStore`. The default store is in memory; add
 `HoneyDrunk.Operator.Data` to keep them across restarts and share them between hosts.
 
+### Subject-scoped approval reads (0.3.0)
+
+Desks that implement `HoneyDrunk.Operator.Abstractions.Approvals.ISubjectScopedApprovalDesk` accept a
+`PendingApprovalQuery` with up to 100 subject identities and a result limit from 1 to 100. Filtering happens
+before ordering by request time descending and approval id ascending, so newer requests for other workloads
+cannot hide a selected workload's pending approval. An empty subject scope returns no results.
+
+The default desk and both production stores support this capability. Custom `IOperatorStore` implementations
+can opt in through `ISubjectScopedOperatorStore`; otherwise the default desk throws `NotSupportedException`
+for a scoped read rather than returning an incomplete unscoped page. Existing `IApprovalDesk` and
+`IOperatorStore` methods are unchanged. Scoped reads neither grant approval nor change decisions.
+
 ### Audit relocation (ADR-0030 / ADR-0031)
 
 `IAuditLog` and `AuditEntry` are **not** owned by Operator. Per the 2026-05-16 ADR-0030 D5 amendment

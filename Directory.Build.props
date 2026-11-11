@@ -6,7 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <Version>0.2.0</Version>
+    <Version>0.3.0</Version>
     <Authors>HoneyDrunk Studios</Authors>
     <Company>HoneyDrunk Studios</Company>
     <PackageProjectUrl>https://github.com/HoneyDrunkStudios/HoneyDrunk.Operator</PackageProjectUrl>

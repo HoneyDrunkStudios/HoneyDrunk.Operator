@@ -4,6 +4,12 @@ All notable changes to this package are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-11-11
+
+### Added
+
+- Added scoped pending approval reads through `ApprovalDataService` and `OperatorDataStore`. Subject, pending and expiry filters, ordering and the result limit execute in SQL before entity materialization. No schema change is required.
+
 ## [0.2.0] - 2026-11-08
 
 ### Added

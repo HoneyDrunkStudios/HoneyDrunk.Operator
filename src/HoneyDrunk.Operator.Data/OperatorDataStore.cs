@@ -1,4 +1,5 @@
 using HoneyDrunk.Operator.Abstractions;
+using HoneyDrunk.Operator.Abstractions.Approvals;
 using HoneyDrunk.Operator.State;
 
 namespace HoneyDrunk.Operator.Data;
@@ -13,7 +14,7 @@ namespace HoneyDrunk.Operator.Data;
 /// <param name="pauses">Manual pauses.</param>
 /// <param name="spend">Spend per budget window.</param>
 /// <param name="audits">The audit outbox.</param>
-internal sealed class OperatorDataStore(ApprovalDataService approvals, PauseDataService pauses, SpendDataService spend, PendingAuditDataService audits) : IOperatorStore
+internal sealed class OperatorDataStore(ApprovalDataService approvals, PauseDataService pauses, SpendDataService spend, PendingAuditDataService audits) : IOperatorStore, ISubjectScopedOperatorStore
 {
     private readonly ApprovalDataService approvals = approvals ?? throw new ArgumentNullException(nameof(approvals));
     private readonly PauseDataService pauses = pauses ?? throw new ArgumentNullException(nameof(pauses));
@@ -34,6 +35,10 @@ internal sealed class OperatorDataStore(ApprovalDataService approvals, PauseData
     /// <inheritdoc />
     public Task<IReadOnlyList<StoredApproval>> ListPendingAsync(DateTimeOffset now, int limit, CancellationToken cancellationToken) =>
         this.approvals.ListPendingAsync(now, limit, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<StoredApproval>> ListPendingAsync(DateTimeOffset now, PendingApprovalQuery query, CancellationToken cancellationToken) =>
+        this.approvals.ListPendingAsync(now, query, cancellationToken);
 
     /// <inheritdoc />
     public Task<PauseState?> GetPauseAsync(string name, CancellationToken cancellationToken) => this.pauses.GetPauseAsync(name, cancellationToken);

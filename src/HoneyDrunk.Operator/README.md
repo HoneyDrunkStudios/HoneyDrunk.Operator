@@ -24,6 +24,14 @@ services
 Plus `OperatorTelemetry` (Kernel `ITelemetryActivityFactory`), `OperatorAuditWriter` (Audit
 `IAuditLog`), and `ApprovalEventEmitter` (`IApprovalEventSink` event-out).
 
+## Scoped pending approvals
+
+Resolve `IApprovalDesk` as usual and test for `ISubjectScopedApprovalDesk` from
+`HoneyDrunk.Operator.Abstractions.Approvals` to request a `PendingApprovalQuery`. `DefaultApprovalDesk`
+requires its store to implement `ISubjectScopedOperatorStore` for that read. The built-in in-memory store
+and `Operator.Data` do; custom stores without it fail explicitly. This is a read capability, not an approval
+or authorization decision. The existing unscoped list and decision methods are unchanged.
+
 ## Host responsibilities
 
 - **Vault** — register an `IConfigProvider` so cost-rate tables, breaker thresholds, decision

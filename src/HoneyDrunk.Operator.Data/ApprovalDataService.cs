@@ -1,4 +1,5 @@
 using HoneyDrunk.Operator.Abstractions;
+using HoneyDrunk.Operator.Abstractions.Approvals;
 using HoneyDrunk.Operator.State;
 using Microsoft.EntityFrameworkCore;
 
@@ -105,6 +106,30 @@ public sealed class ApprovalDataService(IDbContextFactory<OperatorDbContext> con
             .OrderByDescending(row => row.RequestedAtTicks)
             .ThenBy(row => row.ApprovalId)
             .Take(limit)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+        return [.. rows.Select(ApprovalRows.ToStored)];
+    }
+
+    /// <inheritdoc cref="ISubjectScopedOperatorStore.ListPendingAsync" />
+    public async Task<IReadOnlyList<StoredApproval>> ListPendingAsync(DateTimeOffset now, PendingApprovalQuery query, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (query.Subjects.Count == 0)
+        {
+            return [];
+        }
+
+        var subjects = query.Subjects.ToArray();
+        await using var context = await this.contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var nowTicks = now.UtcTicks;
+        var rows = await context.Approvals.AsNoTracking()
+            .Where(row => row.Outcome == (int)ApprovalOutcome.Pending && row.ExpiryTicks > nowTicks)
+            .Where(row => subjects.Contains(row.Subject))
+            .OrderByDescending(row => row.RequestedAtTicks)
+            .ThenBy(row => row.ApprovalId)
+            .Take(query.Limit)
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
         return [.. rows.Select(ApprovalRows.ToStored)];
