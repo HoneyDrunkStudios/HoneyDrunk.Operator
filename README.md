@@ -11,6 +11,10 @@ policy, and safety filters. Operator does not reason — it *constrains*.
 > drift-detection / PR-automation node. The canonical Operator identity is the ADR-0018
 > policy-enforcement substrate, as registered in the Grid catalog (`catalogs/nodes.json`).
 
+## SDK requirement
+
+Build and test with the .NET 11 SDK selected by `global.json`. Runtime packages target `net11.0`; consuming applications must also target .NET 11 or later. The contracts-only Abstractions package targets both `net10.0` and `net11.0` to preserve existing contract consumers.
+
 ## Packages
 
 | Package | Role |
