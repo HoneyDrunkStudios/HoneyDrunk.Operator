@@ -4,6 +4,9 @@ on:
   pull_request:
     branches: [ main ]
     paths:
+      - 'global.json'
+      - 'Directory.Build.props'
+      - '.github/workflows/api-compatibility.yml'
       - 'src/HoneyDrunk.Operator.Abstractions/**'
 
 permissions:
@@ -13,6 +16,8 @@ permissions:
 jobs:
   abstractions-shape:
     name: Abstractions Shape
-    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-api-compatibility.yml@main
+    uses: HoneyDrunkStudios/HoneyDrunk.Actions/.github/workflows/job-api-compatibility.yml@de51d34c6f2f6db2346275b6582c8863521a68ed
     with:
+      dotnet-version: '11.0.100'
+      actions-ref: 'de51d34c6f2f6db2346275b6582c8863521a68ed'
       project-path: src/HoneyDrunk.Operator.Abstractions/HoneyDrunk.Operator.Abstractions.csproj
