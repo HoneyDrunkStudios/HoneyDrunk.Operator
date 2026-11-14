@@ -10,7 +10,7 @@
     <PackageReference Include="HoneyDrunk.Standards" Version="0.4.4" PrivateAssets="all" />
     <PackageReference Include="HoneyDrunk.Kernel.Abstractions" Version="0.8.2" />
     <PackageReference Include="HoneyDrunk.Vault" Version="0.8.2" />
-    <PackageReference Include="HoneyDrunk.Audit.Abstractions" Version="0.2.2" />
+    <PackageReference Include="HoneyDrunk.Audit.Abstractions" Version="0.3.0" />
   </ItemGroup>
   <ItemGroup>
     <None Include="README.md" Pack="true" PackagePath="\" />
