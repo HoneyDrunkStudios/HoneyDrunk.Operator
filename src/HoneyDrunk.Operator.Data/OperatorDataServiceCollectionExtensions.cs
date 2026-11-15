@@ -22,6 +22,7 @@ public static class OperatorDataServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configureDbContext);
         services.AddHoneyDrunkDataEntityFramework<OperatorDbContext>(configureDbContext);
+        services.TryAddSingleton(TimeProvider.System);
         services.RemoveAll<IOperatorStore>();
         services.TryAddSingleton<ApprovalDataService>();
         services.TryAddSingleton<PauseDataService>();

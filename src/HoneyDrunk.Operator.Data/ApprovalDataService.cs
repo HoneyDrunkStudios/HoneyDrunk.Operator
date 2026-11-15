@@ -10,9 +10,18 @@ namespace HoneyDrunk.Operator.Data;
 /// call uses its own context from the factory.
 /// </summary>
 /// <param name="contexts">Creates a context per call.</param>
-public sealed class ApprovalDataService(IDbContextFactory<OperatorDbContext> contexts)
+/// <param name="timeProvider">The clock checked for each write attempt; defaults to the system clock.</param>
+public sealed class ApprovalDataService(IDbContextFactory<OperatorDbContext> contexts, TimeProvider timeProvider)
 {
+    private readonly TimeProvider timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
     private readonly IDbContextFactory<OperatorDbContext> contexts = contexts ?? throw new ArgumentNullException(nameof(contexts));
+
+    /// <summary>Initializes a new instance of the <see cref="ApprovalDataService"/> class with the system clock.</summary>
+    /// <param name="contexts">Creates a context per call.</param>
+    public ApprovalDataService(IDbContextFactory<OperatorDbContext> contexts)
+        : this(contexts, TimeProvider.System)
+    {
+    }
 
     /// <inheritdoc cref="IOperatorStore.GetApprovalAsync" />
     public async Task<StoredApproval?> GetApprovalAsync(string approvalId, CancellationToken cancellationToken)
@@ -62,38 +71,19 @@ public sealed class ApprovalDataService(IDbContextFactory<OperatorDbContext> con
         ArgumentNullException.ThrowIfNull(decision);
         ArgumentNullException.ThrowIfNull(audit);
         await using var context = await this.contexts.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-        return await OperatorUnitOfWork.RunAsync(
-            context,
-            audit.Id,
-            async token =>
-            {
-                var rows = context.Approvals.Where(row => row.ApprovalId == approvalId && row.Outcome == (int)expected);
-                if (decision.Outcome is ApprovalOutcome.Approved or ApprovalOutcome.Denied)
-                {
-                    // A person's decision dated after the expiry is refused by the same statement that writes it.
-                    var decidedAtTicks = decision.DecidedAt.UtcTicks;
-                    rows = rows.Where(row => row.ExpiryTicks >= decidedAtTicks);
-                }
-
-                var updated = await rows
-                    .ExecuteUpdateAsync(
-                        setters => setters
-                            .SetProperty(row => row.Outcome, (int)decision.Outcome)
-                            .SetProperty(row => row.ApproverIdentity, decision.ApproverIdentity)
-                            .SetProperty(row => row.DecidedAtTicks, decision.DecidedAt.UtcTicks)
-                            .SetProperty(row => row.Reason, decision.Reason),
-                        token)
-                    .ConfigureAwait(false);
-                if (updated != 1)
-                {
-                    return false;
-                }
-
-                context.PendingAudits.Add(PendingAuditRows.ToRow(audit));
-                await context.SaveChangesAsync(token).ConfigureAwait(false);
-                return true;
-            },
-            cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return await OperatorUnitOfWork.RunAsync(
+                context,
+                audit.Id,
+                token => this.UpdateDecisionAsync(context, approvalId, expected, decision, audit, token),
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (ApprovalExpiredDuringWriteException)
+        {
+            // The transaction has rolled back both the late decision and any audit entry.
+            return false;
+        }
     }
 
     /// <inheritdoc cref="IOperatorStore.ListPendingAsync" />
@@ -133,6 +123,46 @@ public sealed class ApprovalDataService(IDbContextFactory<OperatorDbContext> con
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
         return [.. rows.Select(ApprovalRows.ToStored)];
+    }
+
+    private async Task<bool> UpdateDecisionAsync(OperatorDbContext context, string approvalId, ApprovalOutcome expected, ApprovalDecision decision, PendingAudit audit, CancellationToken cancellationToken)
+    {
+        var rows = context.Approvals.Where(row => row.ApprovalId == approvalId && row.Outcome == (int)expected);
+        var person = decision.Outcome is ApprovalOutcome.Approved or ApprovalOutcome.Denied;
+        if (person)
+        {
+            // This callback runs again on every retry, after the transaction is opened.
+            var atTicks = Math.Max(decision.DecidedAt.UtcTicks, this.timeProvider.GetUtcNow().UtcTicks);
+            rows = rows.Where(row => row.ExpiryTicks >= atTicks);
+        }
+
+        var updated = await rows.ExecuteUpdateAsync(
+            setters => setters
+                .SetProperty(row => row.Outcome, (int)decision.Outcome)
+                .SetProperty(row => row.ApproverIdentity, decision.ApproverIdentity)
+                .SetProperty(row => row.DecidedAtTicks, decision.DecidedAt.UtcTicks)
+                .SetProperty(row => row.Reason, decision.Reason),
+            cancellationToken).ConfigureAwait(false);
+        if (updated != 1)
+        {
+            return false;
+        }
+
+        context.PendingAudits.Add(PendingAuditRows.ToRow(audit));
+        await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        if (person)
+        {
+            // A database lock or delayed command can outlive the predicate's timestamp. Check again after both writes,
+            // while the transaction still holds the row; throwing rolls back rather than committing a late decision.
+            var expiry = await context.Approvals.Where(row => row.ApprovalId == approvalId)
+                .Select(row => row.ExpiryTicks).SingleAsync(cancellationToken).ConfigureAwait(false);
+            if (this.timeProvider.GetUtcNow().UtcTicks > expiry)
+            {
+                throw new ApprovalExpiredDuringWriteException();
+            }
+        }
+
+        return true;
     }
 
     private bool ApprovalExists(string approvalId)

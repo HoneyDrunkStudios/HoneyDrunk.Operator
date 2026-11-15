@@ -6,5 +6,5 @@ namespace HoneyDrunk.Operator.Tests;
 public sealed class InMemoryOperatorStoreTests : OperatorStoreContract
 {
     /// <inheritdoc />
-    protected override IOperatorStore CreateStore() => new InMemoryOperatorStore();
+    protected override IOperatorStore CreateStore(TimeProvider? clock = null) => new InMemoryOperatorStore(clock ?? new MutableTimeProvider(Now));
 }

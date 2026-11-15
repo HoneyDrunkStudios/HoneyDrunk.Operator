@@ -73,6 +73,25 @@ public abstract class OperatorStoreContract
         Assert.Equal(["requested", "requested", "decided in time", "expired"], await ClaimNames(store));
     }
 
+    /// <summary>An earlier decision arriving after expiry is refused without saving its audit entry.</summary>
+    /// <param name="outcome">The person's decision.</param>
+    /// <returns>A task.</returns>
+    [Theory]
+    [InlineData(ApprovalOutcome.Approved)]
+    [InlineData(ApprovalOutcome.Denied)]
+    public async Task Earlier_decision_arriving_after_expiry_is_refused(ApprovalOutcome outcome)
+    {
+        var clock = new MutableTimeProvider(Now);
+        var store = this.CreateStore(clock);
+        await store.TryAddApprovalAsync(Pending("late-write", Now, Now.AddMinutes(5)), Audit("requested"), CancellationToken.None);
+        var decision = new ApprovalDecision("late-write", outcome, "founder", Now, "earlier decision");
+        clock.Advance(TimeSpan.FromMinutes(6));
+
+        Assert.False(await store.TryUpdateDecisionAsync("late-write", ApprovalOutcome.Pending, decision, Audit("decided"), CancellationToken.None));
+        Assert.Equal(ApprovalOutcome.Pending, (await store.GetApprovalAsync("late-write", CancellationToken.None))!.Decision.Outcome);
+        Assert.Equal(["requested"], await ClaimNames(store));
+    }
+
     /// <summary>The pending list is newest first and leaves out decided and expired requests.</summary>
     /// <returns>A task.</returns>
     [Fact]
@@ -246,8 +265,9 @@ public abstract class OperatorStoreContract
     protected static SpendCharge Charge(decimal amount, BudgetStop? stop = null) => new("agent-a", "2026-11", amount, Audit("recorded"), stop);
 
     /// <summary>Creates the store under test.</summary>
+    /// <param name="clock">The store clock, when a test advances time.</param>
     /// <returns>A new, empty store.</returns>
-    protected abstract IOperatorStore CreateStore();
+    protected abstract IOperatorStore CreateStore(TimeProvider? clock = null);
 
     private static BudgetStop Stop(decimal limit) =>
         new(limit, new PauseState("agent:agent-a", "operator:budget", "monthly budget reached", Now), [Audit("stopped")]);

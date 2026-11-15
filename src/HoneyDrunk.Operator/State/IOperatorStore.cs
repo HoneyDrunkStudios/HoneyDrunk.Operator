@@ -30,8 +30,8 @@ public interface IOperatorStore
     /// <summary>
     /// Replaces a decision only while the stored outcome is <paramref name="expected"/>, saving its audit entry with it.
     /// An <see cref="ApprovalOutcome.Approved"/> or <see cref="ApprovalOutcome.Denied"/> decision is also refused when
-    /// it is dated after the request's expiry, in the same conditional write, so a decision that reaches the store
-    /// late can never be recorded on an expired request.
+    /// it is dated after the request's expiry or the store's current clock has passed that expiry. Providers must
+    /// check time at the write boundary and on every retry, and roll back a write delayed past expiry.
     /// </summary>
     /// <param name="approvalId">The approval id.</param>
     /// <param name="expected">The outcome the stored decision must still have.</param>

@@ -8,14 +8,22 @@ namespace HoneyDrunk.Operator.State;
 /// The default store: process memory only, so nothing survives a restart. Use HoneyDrunk.Operator.Data in production.
 /// One lock guards every write, so each change and its audit entry are saved together.
 /// </summary>
-public sealed class InMemoryOperatorStore : IOperatorStore, ISubjectScopedOperatorStore
+/// <param name="timeProvider">The clock checked under the write lock; defaults to the system clock.</param>
+public sealed class InMemoryOperatorStore(TimeProvider timeProvider) : IOperatorStore, ISubjectScopedOperatorStore
 {
+    private readonly TimeProvider timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
     private readonly Lock sync = new();
     private readonly Dictionary<string, StoredApproval> approvals = new(StringComparer.Ordinal);
     private readonly Dictionary<string, PauseState> pauses = new(StringComparer.Ordinal);
     private readonly Dictionary<(string scope, string window), decimal> spend = [];
     private readonly SortedDictionary<long, Outboxed> outbox = [];
     private long sequence;
+
+    /// <summary>Initializes a new instance of the <see cref="InMemoryOperatorStore"/> class with the system clock.</summary>
+    public InMemoryOperatorStore()
+        : this(TimeProvider.System)
+    {
+    }
 
     /// <inheritdoc />
     public Task<StoredApproval?> GetApprovalAsync(string approvalId, CancellationToken cancellationToken)
@@ -59,8 +67,8 @@ public sealed class InMemoryOperatorStore : IOperatorStore, ISubjectScopedOperat
                 return Task.FromResult(false);
             }
 
-            // A person's decision dated after the expiry is refused here, under the same lock as the write.
-            if (decision.Outcome is ApprovalOutcome.Approved or ApprovalOutcome.Denied && decision.DecidedAt > current.Request.Expiry)
+            // Check both the decision date and the current clock under the write lock; an earlier decision can arrive late.
+            if (decision.Outcome is ApprovalOutcome.Approved or ApprovalOutcome.Denied && (decision.DecidedAt > current.Request.Expiry || this.timeProvider.GetUtcNow() > current.Request.Expiry))
             {
                 return Task.FromResult(false);
             }

@@ -7,6 +7,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="..\HoneyDrunk.Operator.Tests\OperatorStoreContract.cs" Link="OperatorStoreContract.cs" />
+    <Compile Include="..\HoneyDrunk.Operator.Tests\MutableTimeProvider.cs" Link="MutableTimeProvider.cs" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="HoneyDrunk.Standards" Version="0.4.4" PrivateAssets="all" />
