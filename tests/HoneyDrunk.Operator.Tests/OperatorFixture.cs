@@ -19,7 +19,7 @@ internal sealed class OperatorFixture
 {
     public OperatorFixture(IOperatorStore? store = null, IReadOnlyDictionary<string, string>? config = null, IConfigProvider? configProvider = null)
     {
-        this.Store = store ?? new InMemoryOperatorStore();
+        this.Store = store ?? new InMemoryOperatorStore(this.Clock);
         var telemetry = new OperatorTelemetry(Substitute.For<ITelemetryActivityFactory>());
         var audit = new OperatorAuditWriter([this.AuditLog]);
         this.Outbox = new OperatorAuditOutbox(this.Store, audit, this.Clock, NullLogger<OperatorAuditOutbox>.Instance);

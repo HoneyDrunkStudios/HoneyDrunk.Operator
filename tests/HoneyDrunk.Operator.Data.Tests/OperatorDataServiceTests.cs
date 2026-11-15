@@ -221,6 +221,38 @@ public sealed class OperatorDataServiceTests : OperatorStoreContract, IDisposabl
         Assert.Equal(typeof(OperatorDbContext).Assembly, provider.GetRequiredService<IOperatorStore>().GetType().Assembly);
     }
 
+    /// <summary>A delayed database command cannot commit an earlier decision after expiry, including on retry.</summary>
+    /// <param name="retry">Whether the first command fails transiently before it writes.</param>
+    /// <returns>A task.</returns>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Delayed_decision_write_rolls_back_or_rechecks_on_retry(bool retry)
+    {
+        var clock = new MutableTimeProvider(Now);
+        var delay = new DelayApprovalWrite(() => clock.Advance(TimeSpan.FromHours(2)), retry);
+        var store = this.Store(
+            options => options
+                .UseSqlite(this.database.ConnectionString, sqlite => sqlite.ExecutionStrategy(dependencies => new RetryOnLostReply(dependencies)))
+                .AddInterceptors(delay),
+            clock);
+        var request = new ApprovalRequest("delayed", "agent:a", "tool.x", new Dictionary<string, string>(), "capability/x/1.0.0", Now.AddHours(1), "corr");
+        await store.TryAddApprovalAsync(new StoredApproval(request, new ApprovalDecision("delayed", ApprovalOutcome.Pending, string.Empty, Now, null), Now), Audit("requested"), CancellationToken.None);
+        delay.Armed = true;
+
+        var decided = await store.TryUpdateDecisionAsync(
+            "delayed",
+            ApprovalOutcome.Pending,
+            new ApprovalDecision("delayed", ApprovalOutcome.Approved, "founder", Now, "before delay"),
+            Audit("decided"),
+            CancellationToken.None);
+
+        Assert.False(decided);
+        Assert.Equal(retry ? 2 : 1, delay.Attempts);
+        Assert.Equal(ApprovalOutcome.Pending, (await store.GetApprovalAsync("delayed", CancellationToken.None))!.Decision.Outcome);
+        Assert.Equal(["requested"], (await store.ClaimAuditsAsync(clock.GetUtcNow(), clock.GetUtcNow() + Lease, 10, CancellationToken.None)).Select(entry => entry.EventName));
+    }
+
     /// <inheritdoc />
     public void Dispose()
     {
@@ -233,11 +265,12 @@ public sealed class OperatorDataServiceTests : OperatorStoreContract, IDisposabl
     }
 
     /// <inheritdoc />
-    protected override IOperatorStore CreateStore() => this.Store(options => options.UseSqlite(this.database.ConnectionString));
+    protected override IOperatorStore CreateStore(TimeProvider? clock = null) => this.Store(options => options.UseSqlite(this.database.ConnectionString), clock);
 
-    private IOperatorStore Store(Action<DbContextOptionsBuilder> configure)
+    private IOperatorStore Store(Action<DbContextOptionsBuilder> configure, TimeProvider? clock = null)
     {
         var services = new ServiceCollection();
+        services.AddSingleton<TimeProvider>(clock ?? new MutableTimeProvider(Now));
         services.AddOperatorDataStore(configure);
         var provider = services.BuildServiceProvider();
         this.providers.Add(provider);

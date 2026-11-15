@@ -49,7 +49,7 @@ public sealed class DefaultApprovalDesk(
         }
 
         // The decision is dated after the read, and the store refuses it once that time is past the request's
-        // expiry. A read that stalls cannot turn into an approval of an expired request.
+        // expiry. The store also checks its current clock, so a delayed or retried write cannot use this earlier date.
         var now = this.timeProvider.GetUtcNow();
         var decision = new ApprovalDecision(approvalId, outcome, approver, now, reason);
         var audit = PendingAudit.Create(
@@ -62,7 +62,7 @@ public sealed class DefaultApprovalDesk(
             now);
         if (!await this.store.TryUpdateDecisionAsync(approvalId, ApprovalOutcome.Pending, decision, audit, cancellationToken).ConfigureAwait(false))
         {
-            // Another decision landed first, or the request expired before this one was dated.
+            // Another decision landed first, or the request expired before the write completed.
             var stored = await ApprovalExpiry.CurrentAsync(this.store, approvalId, this.timeProvider.GetUtcNow(), cancellationToken).ConfigureAwait(false);
             return Settled(stored, outcome);
         }
